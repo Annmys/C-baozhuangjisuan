@@ -8,7 +8,7 @@ using Sunny.UI;
 using System.Windows.Forms;
 using System.Text;
 using System.Threading.Tasks;
-using OfficeOpenXml; // EPPlus的命名空间
+using OfficeOpenXml; // EPPlus的命名空间.
 
 namespace 包装计算
 {
