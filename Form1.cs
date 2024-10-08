@@ -269,25 +269,39 @@ namespace 包装计算
 
         private void 查找组合(List<double> 灯带_米数列表,List<double> 单前_列表,double 剩下的,int start,HashSet<string> 结果_列表)
         {
-            // 排序并去重
-            单前_列表 = 单前_列表.OrderBy(x => x).ToList();
-            if (单前_列表.Sum() < 查找组合_基数 && 单前_列表.Count > 1)
+            if (单前_列表.Sum() >= 查找组合_基数)
             {
-                string result = string.Join(" + ",单前_列表);
+                return;
+            }
+            if (剩下的 < 0)
+            {
+                return;
+            }
+
+            if (单前_列表.Count > 1)
+            {
+                var sortedList = new List<double>(单前_列表);
+                sortedList.Sort();
+                string result = string.Join(" + ", sortedList);
                 结果_列表.Add(result);
             }
+
 
             for (int i = start; i < 灯带_米数列表.Count; i++)
             {
                 double num = 灯带_米数列表[i];
-                if (!单前_列表.Contains(num) && 单前_列表.Sum() + num < 查找组合_基数)
+                if (!单前_列表.Contains(num))
                 {
                     单前_列表.Add(num);
-                    查找组合(灯带_米数列表,单前_列表,剩下的 - num,i + 1,结果_列表);
+                    查找组合(灯带_米数列表, 单前_列表, 剩下的 - num, i + 1, 结果_列表);
                     单前_列表.RemoveAt(单前_列表.Count - 1);
                 }
             }
+
+           
         }
+
+        
 
     }
 }
