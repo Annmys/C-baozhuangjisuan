@@ -219,89 +219,81 @@ namespace 包装计算
         {
             查找组合_基数 = 8;
 
-            //灯带_米数列表.Add(31.3);
-            //灯带_米数列表.Add(85.4);
-            //灯带_米数列表.Add(31.3);
-            //灯带_米数列表.Add(85.4);
-            //灯带_米数列表.Add(31.1);
-            //灯带_米数列表.Add(85.2);
-            //灯带_米数列表.Add(31.1);
-            //灯带_米数列表.Add(85.2);
-            //灯带_米数列表.Add(91.3);
-            //灯带_米数列表.Add(131.4);
-            //灯带_米数列表.Add(260.5);
-            //灯带_米数列表.Add(29.6); 2024.9.30
-
+            灯带_米数列表.Clear();  // 清空之前的列表，如果有的话
             灯带_米数列表.Add(6.6);
-
+            灯带_米数列表.Add(1.1);
             灯带_米数列表.Add(1.1);
             灯带_米数列表.Add(2.2);
             灯带_米数列表.Add(3.3);
             灯带_米数列表.Add(4.4);
             灯带_米数列表.Add(5.5);
 
+            // 执行查找组合函数并打印结果
 
-            HashSet<string> 结果_列表 = new HashSet<string>(); // 使用HashSet来自动去重
-            int 包装有效面积 = 查找组合_基数;
-
-            // 遍历每个数字，从每个数字开始寻找组合
-            foreach (double num in 灯带_米数列表)
-            {
-                List<double> 临时_列表 = new List<double> { num };  // 初始化临时列表
-                查找组合(灯带_米数列表,临时_列表,包装有效面积 - num,0,结果_列表);
-            }
-
-            StringBuilder message = new StringBuilder();
+            var 结果_列表 = 开始组合(灯带_米数列表, 查找组合_基数);
+            string 输出信息 = "找到的组合：" + Environment.NewLine;
             foreach (var result in 结果_列表)
             {
-                message.AppendLine(result + " < " + 查找组合_基数.ToString());
+                输出信息 += result + Environment.NewLine;
             }
 
-            if (message.Length > 0)
+            if (结果_列表.Any())
             {
-                MessageBox.Show(message.ToString(),"组合结果",MessageBoxButtons.OK,MessageBoxIcon.Information);
+                MessageBox.Show(输出信息, "组合结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
             {
-                MessageBox.Show("没有找到任何组合。","无结果",MessageBoxButtons.OK,MessageBoxIcon.Warning);
+                MessageBox.Show("没有找到任何组合。", "组合结果", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
-        private void 查找组合(List<double> 灯带_米数列表,List<double> 单前_列表,double 剩下的,int start,HashSet<string> 结果_列表)
+        static HashSet<string> 开始组合(List<double> 灯带_米数列表, double 查找组合_基数)
         {
-            if (单前_列表.Sum() >= 查找组合_基数)
-            {
-                return;
-            }
-            if (剩下的 < 0)
-            {
-                return;
-            }
+            var results = new HashSet<string>();  // 使用HashSet来自动去重
+            var used_indices = new HashSet<int>();  // 用于跟踪已使用索引的HashSet
 
-            if (单前_列表.Count > 1)
+            // 定义递归函数查找组合
+            void 查找组合(List<double> 当前组合, double 当前和, int 起始索引)
             {
-                var sortedList = new List<double>(单前_列表);
-                sortedList.Sort();
-                string result = string.Join(" + ", sortedList);
-                结果_列表.Add(result);
-            }
-
-
-            for (int i = start; i < 灯带_米数列表.Count; i++)
-            {
-                double num = 灯带_米数列表[i];
-                if (!单前_列表.Contains(num))
+                // 如果当前和大于等于查找组合基数，返回
+                if (当前和 >= 查找组合_基数)
                 {
-                    单前_列表.Add(num);
-                    查找组合(灯带_米数列表, 单前_列表, 剩下的 - num, i + 1, 结果_列表);
-                    单前_列表.RemoveAt(单前_列表.Count - 1);
+                    return;
+                }
+                // 如果当前组合中有元素，则将其加入结果HashSet
+                if (当前组合.Any())
+                {
+                    results.Add(string.Join(" + ", 当前组合.OrderBy(x => x).Select(x => x.ToString("F1"))));
+                }
+                // 从起始索引开始搜索
+                for (int i = 起始索引; i < 灯带_米数列表.Count; i++)
+                {
+                    if (!used_indices.Contains(i))
+                    {
+                        当前组合.Add(灯带_米数列表[i]);
+                        used_indices.Add(i);
+                        查找组合(当前组合, 当前和 + 灯带_米数列表[i], i + 1);
+                        // 回溯，移除最后一个添加的元素
+                        当前组合.RemoveAt(当前组合.Count - 1);
+                        used_indices.Remove(i);
+                    }
                 }
             }
 
-           
+            // 遍历每个数字，从每个数字开始寻找组合
+            for (int i = 0; i < 灯带_米数列表.Count; i++)
+            {
+                if (!used_indices.Contains(i))
+                {
+                    查找组合(new List<double>(), 0, i);
+                }
+            }
+
+            return results;
         }
 
-        
+
+
 
     }
 }
