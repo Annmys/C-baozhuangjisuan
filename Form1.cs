@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
+using System.Drawing;
 using System.Linq;
 using System.IO;
 using System.Threading;
@@ -9,6 +10,7 @@ using System.Windows.Forms;
 using System.Text;
 using System.Threading.Tasks;
 using OfficeOpenXml; // EPPlus的命名空间.
+
 
 
 
@@ -23,6 +25,7 @@ namespace 包装计算
         List<double> 测试 = new List<double>();
         private List<string> 公司型号列表 = new List<string> 
         { "F10","F15","F16","F21","F22","F23","F1212","F2008","F2010","F2012","F2019","F2222" };
+        List<List<double>> 订单附件 = new List<List<double>> { new List<double>() };
 
         private int 查找组合_基数 = 1900;  // 查找组合的基数
 
@@ -157,24 +160,125 @@ namespace 包装计算
             return materialColumn;
         }
 
-        private void button_附件导入_Click_1(object sender,EventArgs e)
+
+        private void button_附件导入_Click_1(object sender, EventArgs e)
         {
             ExcelPackage.LicenseContext = OfficeOpenXml.LicenseContext.NonCommercial;
 
             OpenFileDialog dialog = new OpenFileDialog();
             dialog.Multiselect = false;
             dialog.Title = "请选择数据库文件";
-            dialog.Filter = "excel文件(*.xlsx)|*.xlsx|All files (*.*)|*.*";
+            dialog.Filter = "Excel 文件(*.xlsx)|*.xlsx|所有文件 (*.*)|*.*";
             dialog.InitialDirectory = Application.StartupPath + @"\数据库";
             uiTextBox_状态.AppendText("附件导入" + Environment.NewLine);
 
             if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
             {
-                附件excel地址 = dialog.FileName;
+                string 附件excel地址 = dialog.FileName;
                 uiTextBox_附件地址.Text = dialog.FileName;
                 uiTextBox_附件地址.BackColor = System.Drawing.Color.LightGreen;
+
+                // 字典，用于存储每个工作表的数据
+                Dictionary<string, List<string>> 工作表数据 = new Dictionary<string, List<string>>();
+
+                try
+                {
+                    using (ExcelPackage package = new ExcelPackage(new FileInfo(附件excel地址)))
+                    {
+                        foreach (ExcelWorksheet worksheet in package.Workbook.Worksheets)
+                        {
+                            List<string> 当前工作表数据 = new List<string>();
+                            int 总长度米行号 = -1;
+
+                            for (int i = 1; i <= worksheet.Dimension.End.Row; i++)
+                            {
+                                var cellValue = worksheet.Cells[i, 18].Value;
+                                if (cellValue != null && cellValue.ToString().Contains("总长度 (米)"))
+                                {
+                                    总长度米行号 = i;
+                                    break;
+                                }
+                            }
+
+                            if (总长度米行号 >= 0)
+                            {
+                                for (int row = 总长度米行号 + 1; row <= worksheet.Dimension.End.Row; row++)
+                                {
+                                    var cellA = worksheet.Cells[row, 1];
+                                    var cellO = worksheet.Cells[row, 15];
+                                    var cellR = worksheet.Cells[row, 18];
+
+                                    if (cellA.Value != null && cellO.Value != null && cellR.Value != null)
+                                    {
+                                        string 内容A = cellA.Value.ToString();
+                                        int 内容O = Convert.ToInt32(cellO.Value);
+                                        double 内容R = Convert.ToDouble(cellR.Value);
+
+                                        if (内容O > 1)
+                                        {
+                                            double 分割后的R值 = 内容R / 内容O;
+                                            for (int i = 0; i < 内容O; i++)
+                                            {
+                                                当前工作表数据.Add($"{内容A}, {1}, {分割后的R值}");
+                                            }
+                                        }
+                                        else
+                                        {
+                                            当前工作表数据.Add($"{内容A}, {内容O}, {内容R}");
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (当前工作表数据.Count > 0)
+                            {
+                                工作表数据[worksheet.Name] = 当前工作表数据;
+                            }
+                        }
+
+                        // 获取用户指定的型号SHEET
+                        string 型号SHEET = "TLX8 naked"; // 这里替换为实际的型号SHEET名称
+                        string 型号SHEET1 = "TLX8 SC HB"; // 这里替换为实际的型号SHEET名称
+
+                        // 检查字典中是否有对应的型号SHEET数据
+                        if (工作表数据.ContainsKey(型号SHEET))
+                        {
+                            string 提示信息 = $"工作表: {型号SHEET}\r\n";
+                            foreach (var item in 工作表数据[型号SHEET])
+                            {
+                                提示信息 += item + "\r\n";
+                            }
+                            MessageBox.Show(提示信息, "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                        else
+                        {
+                            MessageBox.Show("没有找到指定型号的工作表数据。", "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+
+                        // 检查字典中是否有对应的型号SHEET1数据
+                        if (工作表数据.ContainsKey(型号SHEET1))
+                        {
+                            string 提示信息1 = $"工作表: {型号SHEET1}\r\n";
+                            foreach (var item1 in 工作表数据[型号SHEET1])
+                            {
+                                提示信息1 += item1 + "\r\n";
+                            }
+                            MessageBox.Show(提示信息1, "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                        else
+                        {
+                            MessageBox.Show("没有找到指定型号的工作表数据。", "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("读取Excel文件时出错：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         }
+
+
 
         private void button_开始处理_Click(object sender,EventArgs e)
         {
