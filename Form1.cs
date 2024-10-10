@@ -19,34 +19,8 @@ namespace 包装计算
 {
     public partial class Form1 : UIForm
     {
-        private string 订单excel地址;
-        private string 附件excel地址;
-        private List<string> 订单型号列表 = new List<string>();
-        List<double> 测试 = new List<double>();
-        private List<string> 公司型号列表 = new List<string> 
-        { "F10","F15","F16","F21","F22","F23","F1212","F2008","F2010","F2012","F2019","F2222" };
-        List<List<double>> 订单附件 = new List<List<double>> { new List<double>() };
+       private 变量 变量=new 变量();
 
-        private int 查找组合_基数 = 1900;  // 查找组合的基数
-
-
-        private List<灯带尺寸> 灯带尺寸列表 = new List<灯带尺寸>   // 灯带尺寸列表
-        {
-          new 灯带尺寸("F10",9,18),
-          new 灯带尺寸("F15",11.5,21),
-          new 灯带尺寸("F16",15.5,6),
-          new 灯带尺寸("F21",11.5,29),
-          new 灯带尺寸("F22",16,17),
-          new 灯带尺寸("F23",10,10),
-          new 灯带尺寸("F1212",12,12),
-          new 灯带尺寸("F2008",20,8),
-          new 灯带尺寸("F2010",20,10),
-          new 灯带尺寸("F2012",20,12),
-          new 灯带尺寸("F2219",22,19),
-          new 灯带尺寸("F2222",22,22)
-
-        };
-        // 灯带尺寸类
           
 
         public Form1()
@@ -69,20 +43,20 @@ namespace 包装计算
 
             if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
             {
-                订单excel地址 = dialog.FileName;
+                变量.订单excel地址 = dialog.FileName;
                 uiTextBox_订单地址.Text = dialog.FileName;
                 uiTextBox_订单地址.BackColor = System.Drawing.Color.LightGreen;
                 uiTextBox_状态.AppendText("订单导入" + Environment.NewLine);
 
                 try
                 {
-                    int materialColumn = 寻找EXCEL表格_特定内容位置(订单excel地址,"规格型号","Sheet1");
+                    int materialColumn = 寻找EXCEL表格_特定内容位置(变量.订单excel地址,"规格型号","Sheet1");
                     if (materialColumn != -1)
                     {
                         //MessageBox.Show($"找到在第 {materialColumn} 列");
                         uiTextBox_状态.AppendText($"规格型号在第 {materialColumn} 列" + Environment.NewLine);
 
-                        using (var package = new ExcelPackage(new FileInfo(订单excel地址)))
+                        using (var package = new ExcelPackage(new FileInfo(变量.订单excel地址)))
                         {
                             // 读取工作表
                             var worksheet = package.Workbook.Worksheets[0];
@@ -106,13 +80,13 @@ namespace 包装计算
                                         if (!partBetweenSecondAndThirdDashes.Contains("/"))
                                         {
                                             // 检查是否包含公司型号列表中的型号
-                                            if (公司型号列表.Exists(model => partBetweenSecondAndThirdDashes.Contains(model)))
+                                            if (变量.公司型号列表.Exists(model => partBetweenSecondAndThirdDashes.Contains(model)))
                                             {
                                                 // 如果包含，则添加到订单型号列表中
-                                                if (!订单型号列表.Contains(partBetweenSecondAndThirdDashes))
+                                                if (!变量.订单型号列表.Contains(partBetweenSecondAndThirdDashes))
                                                 {
                                                     //MessageBox.Show(partBetweenSecondAndThirdDashes,row.ToString());
-                                                    订单型号列表.Add(partBetweenSecondAndThirdDashes);
+                                                    变量.订单型号列表.Add(partBetweenSecondAndThirdDashes);
                                                 }
                                             }
                                         }
@@ -122,7 +96,7 @@ namespace 包装计算
 
                             // 显示订单型号列表
                             uiTextBox_状态.AppendText("订单型号列表：" + Environment.NewLine);
-                            foreach (var model in 订单型号列表)
+                            foreach (var model in 变量.订单型号列表)
                             {
                                 uiTextBox_状态.AppendText(model + Environment.NewLine);
                             }
@@ -284,18 +258,18 @@ namespace 包装计算
         {
             开始组合();
 
-            foreach (var 尺寸 in 灯带尺寸列表)
+            foreach (var 灯带 in 变量.灯带尺寸列表)
             {
-                if (尺寸.型号 == "F22")
+                if (灯带.型号 == "F22")
                 {
-                    //MessageBox.Show($"型号: {尺寸.型号}, 宽度: {尺寸.宽度}, 高度: {尺寸.高度}, 面积: {尺寸.每米面积}");
-                    //MessageBox.Show($"型号: {尺寸.型号},  面积: {尺寸.每米面积}");
+                    MessageBox.Show($"型号: {灯带.型号}, 宽度: {灯带.宽度}, 高度: {灯带.高度}, 面积: {灯带.每米面积}");
+                    //MessageBox.Show($"型号: {灯带.型号},  面积: {灯带.每米面积}");
 
 
                     
 
 
-                    break; // 如果找到型号为"F22"的尺寸，输出宽度并退出循环
+                    break; // 如果找到型号为"F22"的灯带，输出宽度并退出循环
                 }
             }
 
@@ -303,31 +277,31 @@ namespace 包装计算
 
         private void 开始组合()
         {
-            查找组合_基数 = 10;
+            变量.查找组合_基数 = 10;
 
-            测试.Clear();  // 清空之前的列表，如果有的话
+            变量.测试.Clear();  // 清空之前的列表，如果有的话
 
-            测试.Add(6.6);
-            测试.Add(1.1);
-            测试.Add(1.1);
-            测试.Add(2.2);
-            测试.Add(2.2);
-            测试.Add(2.2);
-            测试.Add(2.2);
-            测试.Add(3.3);
-            测试.Add(4.4);
-            测试.Add(4.4);
-            测试.Add(5.5);
+            变量.测试.Add(6.6);
+            变量.测试.Add(1.1);
+            变量.测试.Add(1.1);
+            变量.测试.Add(2.2);
+            变量.测试.Add(2.2);
+            变量.测试.Add(2.2);
+            变量.测试.Add(2.2);
+            变量.测试.Add(3.3);
+            变量.测试.Add(4.4);
+            变量.测试.Add(4.4);
+            变量.测试.Add(5.5);
 
             // 调用算法
             Solution s = new Solution();
-            var ans = s.CalculateCombinations(测试, 查找组合_基数);
+            var ans = s.CalculateCombinations(变量.测试, 变量.查找组合_基数);
 
             string 输出信息 = "找到的组合：" + Environment.NewLine;
 
             foreach (var combination in ans)
             {
-                输出信息 += string.Join(" + ", combination) + " < " + 查找组合_基数 + Environment.NewLine;
+                输出信息 += string.Join(" + ", combination) + " < " + 变量.查找组合_基数 + Environment.NewLine;
                
             }
 

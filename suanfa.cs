@@ -7,6 +7,11 @@ using System.Threading.Tasks;
 namespace 包装计算
 {
 
+
+
+
+
+
     //按照顺序版算法（简单）
     public class Solution
     {
@@ -91,28 +96,9 @@ namespace 包装计算
 
 
 
-    public class 灯带尺寸
-    {
-        public string 型号 { get; set; }
-        public double 宽度 { get; set; }
-        public double 高度 { get; set; }
-        public double 每米面积 { get; set; }
+    
 
-        public 灯带尺寸(string 型号, double 宽度, double 高度)
-        {
-            this.型号 = 型号;
-            this.宽度 = 宽度;
-            this.高度 = 高度;
-            this.每米面积 = 宽度 * 10; //单位是CM
 
-        }
-
-        // 重写 ToString 方法以便打印
-        public override string ToString()
-        {
-            return $"{型号} - 宽度:{宽度} - 高度:{高度} - 面积:{每米面积}";
-        }
-    }
 
 
 
