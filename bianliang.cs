@@ -10,7 +10,10 @@ namespace 包装计算
     {
         public string? 订单excel地址;
         public string? 附件excel地址;
+
         public List<string> 订单型号列表 = new List<string>();
+        public Dictionary<string, List<string>> 附件表数据 = new Dictionary<string, List<string>>();
+
         public List<double> 测试 = new List<double>();
 
         public List<string> 公司型号列表 = new List<string>
