@@ -167,44 +167,86 @@ namespace 包装计算
 
                 uiTextBox_状态.AppendText("附件导入" + Environment.NewLine);
 
+                //寻找检查字典中对应型号SHEET数据_测试代码();
 
-                // 获取用户指定的型号SHEET
-                string 型号SHEET = "TLX8 naked"; // 这里替换为实际的型号SHEET名称
-                string 型号SHEET1 = "TLX8 SC HB"; // 这里替换为实际的型号SHEET名称
-
-                // 检查字典中是否有对应的型号SHEET数据
-                if (变量.附件表数据.ContainsKey(型号SHEET))
-                {
-                    string 提示信息 = $"工作表: {型号SHEET}\r\n";
-                    foreach (var item in 变量.附件表数据[型号SHEET])
-                    {
-                        提示信息 += item + "\r\n";
-                    }
-                    MessageBox.Show(提示信息, "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
-                else
-                {
-                    MessageBox.Show("没有找到指定型号的工作表数据。", "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-
-                // 检查字典中是否有对应的型号SHEET1数据
-                if (变量.附件表数据.ContainsKey(型号SHEET1))
-                {
-                    string 提示信息1 = $"工作表: {型号SHEET1}\r\n";
-                    foreach (var item1 in 变量.附件表数据[型号SHEET1])
-                    {
-                        提示信息1 += item1 + "\r\n";
-                    }
-                    MessageBox.Show(提示信息1, "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
-                else
-                {
-                    MessageBox.Show("没有找到指定型号的工作表数据。", "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
+                 
 
 
             }
         }
+
+        private void 寻找检查字典中对应型号SHEET数据_测试代码()
+        {
+            // 获取用户指定的型号SHEET
+            string 型号SHEET = "TLX8 naked"; // 这里替换为实际的型号SHEET名称
+            string 型号SHEET1 = "TLX8 SC HB"; // 这里替换为实际的型号SHEET名称
+
+            //// 检查字典中是否有对应的型号SHEET数据
+            //if (变量.附件表数据.ContainsKey(型号SHEET))
+            //{
+            //    string 提示信息 = $"工作表: {型号SHEET}\r\n";
+            //    foreach (var item in 变量.附件表数据[型号SHEET])
+            //    {
+            //        提示信息 += item + "\r\n";
+            //    }
+            //    MessageBox.Show(提示信息, "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            //}
+            //else
+            //{
+            //    MessageBox.Show("没有找到指定型号的工作表数据。", "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            //}
+
+            
+            // 检查字典中是否有对应的型号SHEET数据
+            if (变量.附件表数据.ContainsKey(型号SHEET))
+            {
+                string 提示信息 = $"工作表: {型号SHEET}\r\n";
+                bool foundC1 = false;
+                foreach (var item in 变量.附件表数据[型号SHEET])
+                {
+                    string[] 数据 = item.Split(',');
+
+                    // 假设内容A在第一个位置，内容R在第三个位置
+                    if (数据.Length >= 3 && 数据[0].Trim() == "C1")
+                    {
+                        foundC1 = true;
+                        string 内容R = 数据[2].Trim(); // 提取内容R的值
+                        提示信息 += $"内容A为C1的项，内容R的值为: {内容R}\r\n";
+                    }
+                    else
+                    {
+                        提示信息 += item + "\r\n";
+                    }
+                }
+
+                if (!foundC1)
+                {
+                    提示信息 += "没有找到内容A为C1的项。";
+                }
+
+                MessageBox.Show(提示信息, "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                MessageBox.Show("没有找到指定型号的工作表数据。", "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+
+            // 检查字典中是否有对应的型号SHEET1数据
+            if (变量.附件表数据.ContainsKey(型号SHEET1))
+            {
+                string 提示信息1 = $"工作表: {型号SHEET1}\r\n";
+                foreach (var item1 in 变量.附件表数据[型号SHEET1])
+                {
+                    提示信息1 += item1 + "\r\n";
+                }
+                MessageBox.Show(提示信息1, "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                MessageBox.Show("没有找到指定型号的工作表数据。", "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
 
         private void EXCEL附件数据_转列表() 
         {
@@ -215,7 +257,12 @@ namespace 包装计算
                 {
                     foreach (ExcelWorksheet worksheet in package.Workbook.Worksheets)
                     {
-                        List<string> 当前工作表数据 = new List<string>();
+                        if (!变量.附件表数据.ContainsKey(worksheet.Name))
+                        {
+                            变量.附件表数据[worksheet.Name] = new List<string>();
+                        }
+
+                        //List<string> 当前工作表数据 = new List<string>();
                         int 总长度米行号 = -1;
 
                         for (int i = 1; i <= worksheet.Dimension.End.Row; i++)
@@ -247,21 +294,24 @@ namespace 包装计算
                                         double 分割后的R值 = 内容R / 内容O;
                                         for (int i = 0; i < 内容O; i++)
                                         {
-                                            当前工作表数据.Add($"{内容A}, {1}, {分割后的R值}");
+                                            //当前工作表数据.Add($"{内容A}, {1}, {分割后的R值}");
+                                            // 添加到新的列表中
+                                            List<string> 新数据列表 = new List<string> { $"{内容A}, {1}, {分割后的R值}" };
+                                            变量.附件表数据[worksheet.Name].AddRange(新数据列表);
                                         }
                                     }
                                     else
                                     {
-                                        当前工作表数据.Add($"{内容A}, {内容O}, {内容R}");
+                                       变量.附件表数据[worksheet.Name].Add($"{内容A}, {内容O}, {内容R}");
                                     }
                                 }
                             }
                         }
 
-                        if (当前工作表数据.Count > 0)
-                        {
-                            变量.附件表数据[worksheet.Name] = 当前工作表数据;
-                        }
+                        //if (当前工作表数据.Count > 0)
+                        //{
+                        //    变量.附件表数据[worksheet.Name] = 当前工作表数据;
+                        //}
                     }
 
                 }
@@ -302,17 +352,28 @@ namespace 包装计算
 
             变量.测试.Clear();  // 清空之前的列表，如果有的话
 
-            变量.测试.Add(6.6);
-            变量.测试.Add(1.1);
-            变量.测试.Add(1.1);
-            变量.测试.Add(2.2);
-            变量.测试.Add(2.2);
-            变量.测试.Add(2.2);
-            变量.测试.Add(2.2);
-            变量.测试.Add(3.3);
-            变量.测试.Add(4.4);
-            变量.测试.Add(4.4);
-            变量.测试.Add(5.5);
+            List<数据项> 数据项列表 = new List<数据项>();
+
+            string 型号SHEET = "TLX8 naked";
+
+            if (变量.附件表数据.ContainsKey(型号SHEET))
+            {
+                string 提示信息 = $"工作表: {型号SHEET}\r\n";
+                foreach (var item in 变量.附件表数据[型号SHEET])
+                {
+                    string[] 数据 = item.Split(',');
+                    double 内容R;
+                    double.TryParse(数据[2].Trim(), out 内容R);
+                    string 内容A = 数据[0].Trim(); // 内容A在数组的第1个位置
+                    string 标志 = Guid.NewGuid().ToString(); // 生成唯一标志
+                    数据项列表.Add(new 数据项(内容A, 内容R, 标志));
+                    变量.测试.Add(内容R);
+                    
+                    //MessageBox.Show(数据[0].Trim()+数据[2].Trim(), "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                }
+
+            }
 
             // 调用算法
             Solution s = new Solution();
@@ -322,8 +383,16 @@ namespace 包装计算
 
             foreach (var combination in ans)
             {
-                输出信息 += string.Join(" + ", combination) + " < " + 变量.查找组合_基数 + Environment.NewLine;
-               
+                输出信息 += string.Join(" + ", combination.Select(r =>
+                {
+                    var 项 = 数据项列表.FirstOrDefault(d => d.内容R == r);
+                    if (项 != null)
+                    {
+                        数据项列表.Remove(项); // 从列表中移除这一项
+                        return $"{r} ({项.内容A})";
+                    }
+                    return $"{r}";
+                })) + " < " + 变量.查找组合_基数 + Environment.NewLine;
             }
 
             MessageBox.Show(输出信息, "组合结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
