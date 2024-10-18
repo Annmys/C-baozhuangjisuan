@@ -68,12 +68,14 @@ namespace 包装计算
 public class 数据项
 {
     public string 内容A { get; set; }
+    public string 内容O { get; set; }
     public double 内容R { get; set; }
     public string 标志 { get; set; }
 
-    public 数据项(string a, double r, string id)
+    public 数据项(string a, string o, double r, string id)
     {
         内容A = a;
+        内容O = o;
         内容R = r;
         标志 = id;
     }
