@@ -37,6 +37,7 @@
             uiTextBox_订单地址 = new Sunny.UI.UITextBox();
             uiTextBox_附件地址 = new Sunny.UI.UITextBox();
             uiTextBox_状态 = new Sunny.UI.UITextBox();
+            uiButton1 = new Sunny.UI.UIButton();
             uiStyleManager2 = new Sunny.UI.UIStyleManager(components);
             SuspendLayout();
             // 
@@ -120,11 +121,24 @@
             uiTextBox_状态.TextAlignment = ContentAlignment.MiddleLeft;
             uiTextBox_状态.Watermark = "";
             // 
+            // uiButton1
+            // 
+            uiButton1.Font = new Font("宋体", 12F, FontStyle.Regular, GraphicsUnit.Point, 134);
+            uiButton1.Location = new Point(291, 183);
+            uiButton1.MinimumSize = new Size(1, 1);
+            uiButton1.Name = "uiButton1";
+            uiButton1.Size = new Size(53, 23);
+            uiButton1.TabIndex = 18;
+            uiButton1.Text = "uiButton1";
+            uiButton1.TipsFont = new Font("宋体", 9F, FontStyle.Regular, GraphicsUnit.Point, 134);
+            uiButton1.Click += uiButton1_Click;
+            // 
             // Form1
             // 
             AutoScaleMode = AutoScaleMode.None;
             BackgroundImageLayout = ImageLayout.None;
             ClientSize = new Size(354, 214);
+            Controls.Add(uiButton1);
             Controls.Add(uiTextBox_状态);
             Controls.Add(uiTextBox_附件地址);
             Controls.Add(uiTextBox_订单地址);
@@ -154,5 +168,6 @@
         private Sunny.UI.UITextBox uiTextBox_订单地址;
         private Sunny.UI.UITextBox uiTextBox_附件地址;
         private Sunny.UI.UITextBox uiTextBox_状态;
+        private Sunny.UI.UIButton uiButton1;
     }
 }

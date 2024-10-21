@@ -324,7 +324,7 @@ namespace 包装计算
                     string 内容A = 数据[0].Trim(); // 内容A在数组的第1个位置
                     string 内容O = 数据[1].Trim(); // 内容O在数组的第2个位置
                     string 标志 = Guid.NewGuid().ToString(); // 生成唯一标志
-                    数据项列表.Add(new 数据项(内容A,内容O, 内容R, 标志));
+                    数据项列表.Add(new 数据项(内容A, 内容O, 内容R, 标志));
                     变量.测试.Add(内容R);
 
                     //MessageBox.Show(数据[0].Trim()+数据[2].Trim(), "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -336,7 +336,7 @@ namespace 包装计算
             var ans = s.CalculateCombinations(变量.测试, 变量.查找组合_基数);
 
 
-            保存组合结果到Excel(ans, 数据项列表,型号SHEET);
+            保存组合结果到Excel(ans, 数据项列表, 型号SHEET);
 
             string 输出信息 = "找到的组合：" + Environment.NewLine;
             foreach (var combination in ans)
@@ -357,9 +357,9 @@ namespace 包装计算
             MessageBox.Show(输出信息, "组合结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
-        private void 保存组合结果到Excel(List<List<double>> 组合结果, List<数据项> 数据项原列表,string 文件名)
+        private void 保存组合结果到Excel(List<List<double>> 组合结果, List<数据项> 数据项原列表, string 文件名)
         {
-            string 文件路径 = "输出结果\\"+文件名 + ".xlsx";
+            string 文件路径 = "输出结果\\" + 文件名 + ".xlsx";
             FileInfo 文件信息 = new FileInfo(文件路径);
 
             using (ExcelPackage excelPackage = new ExcelPackage(文件信息))
@@ -393,8 +393,22 @@ namespace 包装计算
             MessageBox.Show($"结果已保存到 {文件路径}", "保存成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
+        private void uiButton1_Click(object sender, EventArgs e)
+        {
+            新包装 新包装实例 = new 新包装();
 
+            // 示例查找
+            var 包装资料 = 新包装实例.查找包装资料("F10", "双层注塑底部出线");
 
-
+            if (包装资料 != null)
+            {
+                string 输出信息 = $"使用包装: {包装资料.半成品BOM物料码}\n总有效容积 = {包装资料.总有效容积}";
+                MessageBox.Show(输出信息, "包装资料", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                MessageBox.Show("未找到匹配的包装资料", "查找结果", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
     }
 }
