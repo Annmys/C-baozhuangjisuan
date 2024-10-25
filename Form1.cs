@@ -47,26 +47,28 @@ namespace 包装计算
             }
         }
 
-        public void EXCEL订单数据_转列表(string excel文件路径)
+        public void EXCEL订单数据_转列表(string excel文件路径) // 订单数据转列表
         {
             try
             {
                 using (var package = new ExcelPackage(new FileInfo(excel文件路径)))
                 {
                     var worksheet = package.Workbook.Worksheets[0];
-                    var 订单出线字典 = new Dictionary<string, List<(string 型号, HashSet<string> 出线方式)>>();
+                    var 订单出线字典 = new Dictionary<string, List<(string 型号, HashSet<string> 出线方式, string F列内容)>>();
 
                     // 从A2单元格获取订单编号
                     string 订单编号 = worksheet.Cells["A2"].Text;
 
-                    订单出线字典[订单编号] = new List<(string, HashSet<string>)>();
+                    订单出线字典[订单编号] = new List<(string, HashSet<string>, string)>();
 
                     string 当前型号 = "";
                     var 当前出线方式 = new HashSet<string>();
+                    string 当前F列内容 = "";
 
                     for (int row = 2; row <= worksheet.Dimension.End.Row; row++)
                     {
                         var specCell = worksheet.Cells[row, 3]; // 规格型号列
+                        var fCell = worksheet.Cells[row, 6];    // F列
 
                         if (specCell.Value != null)
                         {
@@ -77,13 +79,14 @@ namespace 包装计算
                                 // 保存之前的型号信息
                                 if (!string.IsNullOrEmpty(当前型号))
                                 {
-                                    订单出线字典[订单编号].Add((当前型号, new HashSet<string>(当前出线方式)));
+                                    订单出线字典[订单编号].Add((当前型号, new HashSet<string>(当前出线方式), 当前F列内容));
                                     当前出线方式.Clear();
                                 }
 
                                 // 提取新的型号和出线方式
                                 当前型号 = Extract型号名称(规格型号);
                                 当前出线方式 = new HashSet<string>(Extract出线方式(规格型号));
+                                当前F列内容 = fCell.Text; // 获取F列内容
                             }
                             else
                             {
@@ -100,7 +103,7 @@ namespace 包装计算
                     // 保存最后一个型号的信息
                     if (!string.IsNullOrEmpty(当前型号))
                     {
-                        订单出线字典[订单编号].Add((当前型号, new HashSet<string>(当前出线方式)));
+                        订单出线字典[订单编号].Add((当前型号, new HashSet<string>(当前出线方式), 当前F列内容));
                     }
 
                     // 输出订单信息
@@ -113,85 +116,70 @@ namespace 包装计算
             }
         }
 
-        private void 输出订单信息(string 订单编号, List<(string 型号, HashSet<string> 出线方式)> 型号出线方式列表)
+        private void 输出订单信息(string 订单编号, List<(string 型号, HashSet<string> 出线方式, string F列内容)> 型号出线方式列表)
         {
             uiTextBox_状态.AppendText($"订单编号: {订单编号}" + Environment.NewLine);
-            foreach (var (型号, 出线方式) in 型号出线方式列表)
+            foreach (var (型号, 出线方式, F列内容) in 型号出线方式列表)
             {
                 string 出线方式字符串 = 出线方式.Count > 0 ? string.Join("，", 出线方式) : "无";
                 uiTextBox_状态.AppendText($"当前型号: {型号}" + Environment.NewLine);
                 uiTextBox_状态.AppendText($"当前出线方式: {出线方式字符串}" + Environment.NewLine);
+                uiTextBox_状态.AppendText($"F列内容: {F列内容}" + Environment.NewLine);
+                uiTextBox_状态.AppendText(Environment.NewLine); // 添加一个空行，使输出更易读
             }
         }
 
         private string Extract型号名称(string 规格型号)
-        {
-            var parts = 规格型号.Split('-');
-            if (parts.Length >= 3)
-            {
-                return parts[2];
-            }
-            return "";
-        }
+{
+    var parts = 规格型号.Split('-');
+    if (parts.Length >= 3)
+    {
+        return parts[2];
+    }
+    return "";
+}
 
-        private List<string> Extract出线方式(string 规格型号)
-        {
-            var 出线方式列表 = new List<string>();
+private List<string> Extract出线方式(string 规格型号)
+{
+    var 出线方式列表 = new List<string>();
 
-            var 出线方式对照表 = new Dictionary<string, List<string>>
+    var 出线方式对照表 = new Dictionary<string, List<string>>
     {
         { "端部出线", new List<string> { "端部出线", "端部" } },
         { "侧面出线", new List<string> { "侧面出线", "侧部出线", "侧部", "侧面" } },
         { "底部出线", new List<string> { "底部出线", "底部" } }
     };
 
-            if (规格型号.StartsWith("C-"))
-            {
-                var match = System.Text.RegularExpressions.Regex.Match(规格型号, @"【(.+?)】");
-                if (match.Success)
-                {
-                    string 出线内容 = match.Groups[1].Value;
-                    foreach (var 出线方式 in 出线方式对照表)
-                    {
-                        if (出线方式.Value.Any(变体 => 出线内容.Contains(变体)))
-                        {
-                            出线方式列表.Add(出线方式.Key);
-                        }
-                    }
-                }
-            }
-            else
-            {
-                foreach (var 出线方式 in 出线方式对照表)
-                {
-                    if (出线方式.Value.Any(变体 => 规格型号.Contains(变体)))
-                    {
-                        出线方式列表.Add(出线方式.Key);
-                    }
-                }
-            }
-
-            return 出线方式列表;
-        }
-
-        private int 寻找EXCEL表格_特定内容位置(string excel地址, string 寻找字符, string sheet名字)
+    if (规格型号.StartsWith("C-"))
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(规格型号, @"【(.+?)】");
+        if (match.Success)
         {
-            int materialColumn = -1;
-            using (var package = new ExcelPackage(new FileInfo(excel地址)))
+            string 出线内容 = match.Groups[1].Value;
+            foreach (var 出线方式 in 出线方式对照表)
             {
-                var worksheet = package.Workbook.Worksheets[sheet名字];
-                for (int col = 1; col <= worksheet.Dimension.End.Column; col++)
+                if (出线方式.Value.Any(变体 => 出线内容.Contains(变体)))
                 {
-                    var cell = worksheet.Cells[1, col];
-                    if (cell.Value != null && cell.Value.ToString().Contains(寻找字符))
-                    {
-                        materialColumn = col;
-                        break;
-                    }
+                    出线方式列表.Add(出线方式.Key);
                 }
             }
-            return materialColumn;
         }
+    }
+    else
+    {
+        foreach (var 出线方式 in 出线方式对照表)
+        {
+            if (出线方式.Value.Any(变体 => 规格型号.Contains(变体)))
+            {
+                出线方式列表.Add(出线方式.Key);
+            }
+        }
+    }
+
+    return 出线方式列表;
+    
+}
+        
 
         private void button_附件导入_Click_1(object sender, EventArgs e)
         {
@@ -213,7 +201,7 @@ namespace 包装计算
 
                 uiTextBox_状态.AppendText("附件导入" + Environment.NewLine);
 
-                //寻找检查字典中对应型号SHEET数据_测试代码();
+                
             }
         }
 
@@ -335,6 +323,7 @@ namespace 包装计算
                         //if (当前工作表数据.Count > 0)
                         //{
                         //    变量.附件表数据[worksheet.Name] = 当前工作表数据;
+                        
                         //}
                     }
                 }
