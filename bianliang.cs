@@ -14,6 +14,8 @@ namespace 包装计算
         public List<string> 订单型号列表 = new List<string>();
         public Dictionary<string, List<string>> 附件表数据 = new Dictionary<string, List<string>>();
 
+        public Dictionary<string, List<(string 型号, HashSet<string> 出线方式, string F列内容)>> 订单出线字典;
+
         public List<double> 测试 = new List<double>();
 
         public List<string> 公司型号列表 = new List<string>

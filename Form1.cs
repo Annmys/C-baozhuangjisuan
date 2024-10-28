@@ -1,15 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Collections.Concurrent;
-using System.Drawing;
-using System.Linq;
-using System.IO;
-using System.Threading;
-using Sunny.UI;
-using System.Windows.Forms;
-using System.Text;
-using System.Threading.Tasks;
 using OfficeOpenXml; // EPPlus的命名空间.
+using Sunny.UI;
 
 namespace 包装计算
 {
@@ -41,25 +31,24 @@ namespace 包装计算
                 uiTextBox_订单地址.Text = dialog.FileName;
                 uiTextBox_订单地址.BackColor = System.Drawing.Color.LightGreen;
 
-                EXCEL订单数据_转列表(变量.订单excel地址 );
+                EXCEL订单数据_转列表(变量.订单excel地址);
 
                 uiTextBox_状态.AppendText("订单导入" + Environment.NewLine);
             }
         }
 
-        public void EXCEL订单数据_转列表(string excel文件路径) // 订单数据转列表
+        public void EXCEL订单数据_转列表(string excel文件路径)
         {
+
             try
             {
                 using (var package = new ExcelPackage(new FileInfo(excel文件路径)))
                 {
                     var worksheet = package.Workbook.Worksheets[0];
-                    var 订单出线字典 = new Dictionary<string, List<(string 型号, HashSet<string> 出线方式, string F列内容)>>();
+                    变量.订单出线字典 = new Dictionary<string, List<(string 型号, HashSet<string> 出线方式, string F列内容)>>();
 
-                    // 从A2单元格获取订单编号
                     string 订单编号 = worksheet.Cells["A2"].Text;
-
-                    订单出线字典[订单编号] = new List<(string, HashSet<string>, string)>();
+                    变量.订单出线字典[订单编号] = new List<(string, HashSet<string>, string)>();
 
                     string 当前型号 = "";
                     var 当前出线方式 = new HashSet<string>();
@@ -79,14 +68,16 @@ namespace 包装计算
                                 // 保存之前的型号信息
                                 if (!string.IsNullOrEmpty(当前型号))
                                 {
-                                    订单出线字典[订单编号].Add((当前型号, new HashSet<string>(当前出线方式), 当前F列内容));
+                                    变量.订单出线字典[订单编号].Add((当前型号, new HashSet<string>(当前出线方式), 当前F列内容));
                                     当前出线方式.Clear();
                                 }
 
                                 // 提取新的型号和出线方式
-                                当前型号 = Extract型号名称(规格型号);
-                                当前出线方式 = new HashSet<string>(Extract出线方式(规格型号));
-                                当前F列内容 = fCell.Text; // 获取F列内容
+                                var parts = 规格型号.Split('-');
+                                当前型号 = parts.Length >= 3 ? parts[2] : "";
+                                当前出线方式 = new HashSet<string>(Extract出线方式(规格型号, fCell.Text));
+                                
+                                当前F列内容 = fCell.Text;
                             }
                             else
                             {
@@ -95,6 +86,7 @@ namespace 包装计算
                                 foreach (var 方式 in 额外出线方式)
                                 {
                                     当前出线方式.Add(方式);
+                                    
                                 }
                             }
                         }
@@ -103,11 +95,11 @@ namespace 包装计算
                     // 保存最后一个型号的信息
                     if (!string.IsNullOrEmpty(当前型号))
                     {
-                        订单出线字典[订单编号].Add((当前型号, new HashSet<string>(当前出线方式), 当前F列内容));
+                        变量.订单出线字典[订单编号].Add((当前型号, new HashSet<string>(当前出线方式), 当前F列内容));
                     }
 
                     // 输出订单信息
-                    输出订单信息(订单编号, 订单出线字典[订单编号]);
+                    输出订单信息(订单编号, 变量.订单出线字典[订单编号]);
                 }
             }
             catch (Exception ex)
@@ -130,56 +122,89 @@ namespace 包装计算
         }
 
         private string Extract型号名称(string 规格型号)
-{
-    var parts = 规格型号.Split('-');
-    if (parts.Length >= 3)
-    {
-        return parts[2];
-    }
-    return "";
-}
+        {
+            var parts = 规格型号.Split('-');
+            if (parts.Length >= 3)
+            {
+                return parts[2];
+            }
+            return "";
+        }
 
-private List<string> Extract出线方式(string 规格型号)
-{
-    var 出线方式列表 = new List<string>();
+        private List<string> Extract出线方式(string 规格型号, string F列内容 = "")  // 添加F列内容参数
+        {
+            var 出线方式列表 = new List<string>();
+            var 需要判断弯型的型号 = new List<string> { "F22", "F23", "F2222", "F2219" };
 
-    var 出线方式对照表 = new Dictionary<string, List<string>>
+            var 出线方式对照表 = new Dictionary<string, List<string>>
     {
         { "端部出线", new List<string> { "端部出线", "端部" } },
         { "侧面出线", new List<string> { "侧面出线", "侧部出线", "侧部", "侧面" } },
         { "底部出线", new List<string> { "底部出线", "底部" } }
     };
 
-    if (规格型号.StartsWith("C-"))
-    {
-        var match = System.Text.RegularExpressions.Regex.Match(规格型号, @"【(.+?)】");
-        if (match.Success)
-        {
-            string 出线内容 = match.Groups[1].Value;
-            foreach (var 出线方式 in 出线方式对照表)
+            // 提取型号名称
+            string 基础型号 = "";
+            if (规格型号.StartsWith("C-"))
             {
-                if (出线方式.Value.Any(变体 => 出线内容.Contains(变体)))
+                var parts = 规格型号.Split('-');
+                if (parts.Length >= 3)
                 {
-                    出线方式列表.Add(出线方式.Key);
+                    基础型号 = parts[2];
                 }
             }
-        }
-    }
-    else
-    {
-        foreach (var 出线方式 in 出线方式对照表)
-        {
-            if (出线方式.Value.Any(变体 => 规格型号.Contains(变体)))
-            {
-                出线方式列表.Add(出线方式.Key);
-            }
-        }
-    }
 
-    return 出线方式列表;
-    
-}
-        
+            // 判断是否是特殊型号
+            bool 是特殊型号 = 需要判断弯型的型号.Any(型号 => 基础型号.StartsWith(型号));
+
+            if (规格型号.StartsWith("C-") && 是特殊型号)
+            {
+                bool 是正弯 = 规格型号.Contains("正弯");
+                string 弯型前缀 = 是正弯 ? "正弯" : "侧弯";
+
+                // 对于F22型号，默认添加所有出线方式
+                if (基础型号.StartsWith("F22"))
+                {
+                    出线方式列表.Add($"{弯型前缀}底部出线");
+                    出线方式列表.Add($"{弯型前缀}端部出线");
+                    出线方式列表.Add($"{弯型前缀}侧面出线");
+                }
+                // 对于F23B型号，根据F列内容判断
+                else if (基础型号.StartsWith("F23"))
+                {
+                    if (!F列内容.Contains("naked"))
+                    {
+                        出线方式列表.Add($"{弯型前缀}端部出线");
+                        出线方式列表.Add($"{弯型前缀}侧面出线");
+                    }
+                }
+                // 其他特殊型号的处理
+                else
+                {
+                    foreach (var 出线方式 in 出线方式对照表)
+                    {
+                        if (出线方式.Value.Any(变体 => 规格型号.Contains(变体)))
+                        {
+                            出线方式列表.Add($"{弯型前缀}{出线方式.Key}");
+                        }
+                    }
+                }
+
+                MessageBox.Show($"规格型号: {规格型号}\n基础型号: {基础型号}\n是正弯: {是正弯}\n弯型前缀: {弯型前缀}\nF列内容: {F列内容}\n出线方式: {string.Join(", ", 出线方式列表)}");
+            }
+            else if (规格型号.StartsWith("C-"))
+            {
+                foreach (var 出线方式 in 出线方式对照表)
+                {
+                    if (出线方式.Value.Any(变体 => 规格型号.Contains(变体)))
+                    {
+                        出线方式列表.Add(出线方式.Key);
+                    }
+                }
+            }
+
+            return 出线方式列表;
+        }
 
         private void button_附件导入_Click_1(object sender, EventArgs e)
         {
@@ -200,8 +225,6 @@ private List<string> Extract出线方式(string 规格型号)
                 EXCEL附件数据_转列表();
 
                 uiTextBox_状态.AppendText("附件导入" + Environment.NewLine);
-
-                
             }
         }
 
@@ -323,7 +346,7 @@ private List<string> Extract出线方式(string 规格型号)
                         //if (当前工作表数据.Count > 0)
                         //{
                         //    变量.附件表数据[worksheet.Name] = 当前工作表数据;
-                        
+
                         //}
                     }
                 }
@@ -382,7 +405,6 @@ private List<string> Extract出线方式(string 规格型号)
             // 调用算法
             Solution s = new Solution();
             var ans = s.CalculateCombinations(变量.测试, 变量.查找组合_基数);
-
 
             保存组合结果到Excel(ans, 数据项列表, 型号SHEET);
 
@@ -452,10 +474,9 @@ private List<string> Extract出线方式(string 规格型号)
             {
                 string 输出信息 = $"使用包装: {包装资料.半成品BOM物料码}\n总有效容积 = {包装资料.总有效容积}";
                 MessageBox.Show(输出信息, "包装资料", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
             }
             else
-                
+
             {
                 MessageBox.Show("未找到匹配的包装资料", "查找结果", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
