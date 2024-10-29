@@ -23,22 +23,23 @@ namespace 包装计算
 
         public List<List<double>> 订单附件 = new List<List<double>> { new List<double>() };
 
-        public int 查找组合_基数 = 1900;  // 查找组合的基数
+        public double 查找组合_基数 = 1900;  // 查找组合的基数
 
         public List<灯带尺寸> 灯带尺寸列表 = new List<灯带尺寸>   // 灯带尺寸列表
         {
-            new 灯带尺寸("F10",9,18),
-            new 灯带尺寸("F15",11.5,21),
-            new 灯带尺寸("F16",15.5,6),
-            new 灯带尺寸("F21",11.5,29),
-            new 灯带尺寸("F22",16,17),
-            new 灯带尺寸("F23",10,10),
-            new 灯带尺寸("F1212",12,12),
-            new 灯带尺寸("F2008",20,8),
-            new 灯带尺寸("F2010",20,10),
-            new 灯带尺寸("F2012",20,12),
-            new 灯带尺寸("F2219",22,19),
-            new 灯带尺寸("F2222",22,22)
+            //灯带尺寸名称,横截面宽度,横截面高度，单位是CM
+            new 灯带尺寸("F10",0.9,1.8),
+            new 灯带尺寸("F15",1.15,2.1),
+            new 灯带尺寸("F16",1.55,0.6),
+            new 灯带尺寸("F21",1.15,2.9),
+            new 灯带尺寸("F22",1.6,1.7),
+            new 灯带尺寸("F23",1.0,1.0),
+            new 灯带尺寸("F1212",1.2,1.2),
+            new 灯带尺寸("F2008",2.0,0.8),
+            new 灯带尺寸("F2010",2.0,1.0),
+            new 灯带尺寸("F2012",2.0,1.2),
+            new 灯带尺寸("F2219",2.2,1.9),
+            new 灯带尺寸("F2222",2.2,2.2)
         };
 
 
@@ -47,22 +48,22 @@ namespace 包装计算
     public class 灯带尺寸
     {
         public string 型号 { get; set; }
-        public double 宽度 { get; set; }
-        public double 高度 { get; set; }
-        public double 每米面积 { get; set; }
+        public double 横截面宽度 { get; set; }
+        public double 横截面高度 { get; set; }
+        public double 每厘米面积 { get; set; }
 
         public 灯带尺寸(string 型号, double 宽度, double 高度)
         {
             this.型号 = 型号;
-            this.宽度 = 宽度;
-            this.高度 = 高度;
-            this.每米面积 = 宽度 * 10; //单位是CM
+            this.横截面宽度 = 宽度;
+            this.横截面高度 = 高度;
+            this.每厘米面积 = 宽度 * 1; //单位是CM
         }
 
         // 重写 ToString 方法以便打印
         public override string ToString()
         {
-            return $"{型号} - 宽度:{宽度} - 高度:{高度} - 面积:{每米面积}";
+            return $"{型号} - 宽度:{横截面宽度} - 高度:{横截面高度} - 面积:{每厘米面积}";
         }
     }
 }

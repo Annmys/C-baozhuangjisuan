@@ -1,5 +1,6 @@
 using OfficeOpenXml; // EPPlus的命名空间.
 using Sunny.UI;
+using System.Text;
 
 namespace 包装计算
 {
@@ -121,15 +122,7 @@ namespace 包装计算
             }
         }
 
-        private string Extract型号名称(string 规格型号)
-        {
-            var parts = 规格型号.Split('-');
-            if (parts.Length >= 3)
-            {
-                return parts[2];
-            }
-            return "";
-        }
+
 
         private List<string> Extract出线方式(string 规格型号, string F列内容 = "")  // 添加F列内容参数
         {
@@ -190,7 +183,7 @@ namespace 包装计算
                     }
                 }
 
-                MessageBox.Show($"规格型号: {规格型号}\n基础型号: {基础型号}\n是正弯: {是正弯}\n弯型前缀: {弯型前缀}\nF列内容: {F列内容}\n出线方式: {string.Join(", ", 出线方式列表)}");
+                //MessageBox.Show($"规格型号: {规格型号}\n基础型号: {基础型号}\n是正弯: {是正弯}\n弯型前缀: {弯型前缀}\nF列内容: {F列内容}\n出线方式: {string.Join(", ", 出线方式列表)}");
             }
             else if (规格型号.StartsWith("C-"))
             {
@@ -360,29 +353,46 @@ namespace 包装计算
         private void button_开始处理_Click(object sender, EventArgs e)
         {
             string 型号SHEET = "TLX8 naked";
-            开始组合(型号SHEET);
+            string 产品型号 = "F23";  // 根据实际情况设置对应的产品型号
 
-            foreach (var 灯带 in 变量.灯带尺寸列表)
+            // 查找对应型号的灯带尺寸
+            var 灯带尺寸 = 变量.灯带尺寸列表.FirstOrDefault(x => x.型号 == 产品型号);
+            if (灯带尺寸 == null)
             {
-                if (灯带.型号 == "F22")
-                {
-                    MessageBox.Show($"型号: {灯带.型号}, 宽度: {灯带.宽度}, 高度: {灯带.高度}, 面积: {灯带.每米面积}");
-                    //MessageBox.Show($"型号: {灯带.型号},  面积: {灯带.每米面积}");
-
-                    break; // 如果找到型号为"F22"的灯带，输出宽度并退出循环
-                }
+                MessageBox.Show($"未找到型号 {产品型号} 的尺寸数据", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
             }
+
+            // 设置默认的包装容积（如果需要的话）
+            变量.查找组合_基数 = 1420*0.6;  // 这里可以根据实际情况设置默认值
+
+            // 调用修改后的开始组合方法
+            开始组合(型号SHEET, 产品型号);
+
+            // 显示选中灯带的信息
+            MessageBox.Show(
+                $"型号: {灯带尺寸.型号}\n" +
+                $"宽度: {灯带尺寸.横截面宽度}\n" +
+                $"高度: {灯带尺寸.横截面高度}\n" +
+                $"每厘米面积: {灯带尺寸.每厘米面积}",
+                "灯带信息",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information
+            );
         }
 
-        private void 开始组合(string 型号SHEET)
+        private void 开始组合(string 型号SHEET, string 产品型号)
         {
-            变量.查找组合_基数 = 10;
+            // 查找对应型号的灯带尺寸
+            var 灯带尺寸 = 变量.灯带尺寸列表.FirstOrDefault(x => x.型号 == 产品型号.Replace("B", ""));
+            if (灯带尺寸 == null)
+            {
+                MessageBox.Show($"未找到型号 {产品型号} 的尺寸数据", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
 
-            变量.测试.Clear();  // 清空之前的列表，如果有的话
-
+            变量.测试.Clear();  // 清空之前的列表
             List<数据项> 数据项列表 = new List<数据项>();
-
-            //string 型号SHEET = "TLX8 naked";
 
             if (变量.附件表数据.ContainsKey(型号SHEET))
             {
@@ -391,14 +401,18 @@ namespace 包装计算
                 {
                     string[] 数据 = item.Split(',');
                     double 内容R;
-                    double.TryParse(数据[2].Trim(), out 内容R);
-                    string 内容A = 数据[0].Trim(); // 内容A在数组的第1个位置
-                    string 内容O = 数据[1].Trim(); // 内容O在数组的第2个位置
-                    string 标志 = Guid.NewGuid().ToString(); // 生成唯一标志
-                    数据项列表.Add(new 数据项(内容A, 内容O, 内容R, 标志));
-                    变量.测试.Add(内容R);
+                    if (double.TryParse(数据[2].Trim(), out 内容R))
+                    {
+                        // 将米转换为厘米并计算实际面积
+                        double 实际面积 = 灯带尺寸.每厘米面积 * (内容R * 100);  // 内容R转换为厘米
 
-                    //MessageBox.Show(数据[0].Trim()+数据[2].Trim(), "总长度数据", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        string 内容A = 数据[0].Trim(); // 内容A在数组的第1个位置
+                        string 内容O = 数据[1].Trim(); // 内容O在数组的第2个位置
+                        string 标志 = Guid.NewGuid().ToString(); // 生成唯一标志
+
+                        数据项列表.Add(new 数据项(内容A, 内容O, 实际面积, 标志));
+                        变量.测试.Add(实际面积);
+                    }
                 }
             }
 
@@ -463,23 +477,116 @@ namespace 包装计算
             MessageBox.Show($"结果已保存到 {文件路径}", "保存成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
+
         private void uiButton1_Click(object sender, EventArgs e)
         {
-            新包装 新包装实例 = new 新包装();
 
-            // 示例查找
-            var 包装资料 = 新包装实例.查找包装资料("F10", "双层注塑底部出线");
-
-            if (包装资料 != null)
+            if (变量.订单出线字典 == null || !变量.订单出线字典.Any())
             {
-                string 输出信息 = $"使用包装: {包装资料.半成品BOM物料码}\n总有效容积 = {包装资料.总有效容积}";
-                MessageBox.Show(输出信息, "包装资料", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("请先导入订单数据", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // 处理每个订单
+            foreach (var 订单 in 变量.订单出线字典)
+            {
+                string 订单编号 = 订单.Key;
+                var 订单明细列表 = 订单.Value;
+
+                uiTextBox_状态.AppendText($"开始处理订单：{订单编号}" + Environment.NewLine);
+
+                // 处理订单中的每个型号
+                foreach (var (型号, 出线方式, F列内容) in 订单明细列表)
+                {
+                    处理订单包装(型号, 出线方式.ToList(), F列内容);
+                }
+
+                uiTextBox_状态.AppendText("订单处理完成" + Environment.NewLine);
+                uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
+            }
+
+
+        }
+
+
+
+        private void 处理订单包装(string 型号, List<string> 出线方式列表, string F列内容)
+        {
+            新包装 新包装实例 = new 新包装();
+            StringBuilder 结果信息 = new StringBuilder();
+            结果信息.AppendLine($"型号: {型号}");
+            结果信息.AppendLine($"F列内容: {F列内容}");
+
+            // 如果是F23B，需要移除B后缀进行查询
+            string 查询型号 = 型号.Replace("B", "");
+
+            // 处理每个出线方式
+            if (出线方式列表.Count > 0)
+            {
+                foreach (var 出线方式 in 出线方式列表)
+                {
+                    string 查询类型 = 转换出线方式格式(型号, 出线方式, F列内容);
+                    var 包装资料 = 新包装实例.查找包装资料(查询型号, 查询类型);
+
+                    if (包装资料 != null)
+                    {
+                        结果信息.AppendLine($"出线方式: {出线方式}");
+                        结果信息.AppendLine($"使用包装: {包装资料.半成品BOM物料码}");
+                        结果信息.AppendLine($"总有效容积: {包装资料.总有效容积}");
+                        结果信息.AppendLine("-------------------");
+                    }
+                    else
+                    {
+                        结果信息.AppendLine($"出线方式: {出线方式} - 未找到匹配的包装资料");
+                        结果信息.AppendLine("-------------------");
+                    }
+                }
             }
             else
-
             {
-                MessageBox.Show("未找到匹配的包装资料", "查找结果", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                // 处理无出线方式的情况（如 TLX8 naked）
+                string 查询类型 = "多条或短条包装";  // 根据实际情况调整
+                var 包装资料 = 新包装实例.查找包装资料(查询型号, 查询类型);
+
+                if (包装资料 != null)
+                {
+                    结果信息.AppendLine("多条或短条包装");
+                    结果信息.AppendLine($"使用包装: {包装资料.半成品BOM物料码}");
+                    结果信息.AppendLine($"总有效容积: {包装资料.总有效容积}");
+                }
+                else
+                {
+                    结果信息.AppendLine("未找到匹配的包装资料");
+                }
             }
+
+            MessageBox.Show(结果信息.ToString(), "包装查询结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
+
+        private string 转换出线方式格式(string 型号, string 出线方式, string F列内容)
+        {
+            // 移除可能的"正弯"或"侧弯"前缀
+            string 处理后出线方式 = 出线方式
+                .Replace("正弯", "")
+                .Replace("侧弯", "");
+
+            // 根据F列内容判断是单层还是双层
+            string 层类型 = F列内容.Contains("SC") ? "双层" : "单层";
+
+            // 组合最终的查询类型
+            return $"{层类型}注塑{处理后出线方式}";
+        }
+
+
+
+
+
+
+
+
+
     }
+
+
+
 }
