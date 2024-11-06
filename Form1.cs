@@ -66,12 +66,15 @@ namespace 包装计算
                             case "单据编号":
                                 订单编号列 = col;
                                 break;
+
                             case "规格型号":
                                 规格型号列 = col;
                                 break;
+
                             case "销售数量":
                                 销售数量列 = col;
                                 break;
+
                             case "物料编码":
                                 F列 = col;
                                 break;
@@ -146,8 +149,6 @@ namespace 包装计算
             当前F列内容 = mainMaterialCell.Text;
             double.TryParse(mainSalesCell.Text, out 当前销售数量);
 
-            
-
             // 从规格型号中提取基础型号
             if (规格型号.Contains("C-SFR-") || 规格型号.Contains("C-FR-"))
             {
@@ -162,7 +163,6 @@ namespace 包装计算
                     }
                 }
             }
-
 
             // 确定弯型
             var 需要判断弯型的型号 = new List<string> { "F22", "F23", "F2222", "F2219" };
@@ -206,8 +206,6 @@ namespace 包装计算
                 }
             }
 
-           
-
             // 最后添加弯型前缀（如果有）
             当前出线方式.Clear();
             bool 是特殊型号 = false;
@@ -242,7 +240,7 @@ namespace 包装计算
                               $"出线方式：{string.Join("，", 当前出线方式)}\n" +
                               $"销售数量：{当前销售数量}";
 
-            MessageBox.Show(debugInfo);
+            //MessageBox.Show(debugInfo);
         }
 
         private void 输出订单信息(string 订单编号, List<(string 型号, HashSet<string> 出线方式, string F列内容, double 销售数量)> 型号出线方式列表)
@@ -258,7 +256,6 @@ namespace 包装计算
                 uiTextBox_状态.AppendText(Environment.NewLine);
             }
         }
-
 
         private async void button_附件导入_Click_1(object sender, EventArgs e)
         {
@@ -278,13 +275,10 @@ namespace 包装计算
 
                 EXCEL附件数据_转列表();
 
-                uiTextBox_状态.AppendText("附件导入" + Environment.NewLine);
+                //uiTextBox_状态.AppendText("附件导入完成" + Environment.NewLine);
+                //uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
             }
-
-            
         }
-
-        
 
         private void EXCEL附件数据_转列表()
         {
@@ -294,59 +288,201 @@ namespace 包装计算
                 {
                     foreach (ExcelWorksheet worksheet in package.Workbook.Worksheets)
                     {
+                        // 检查工作表是否为空
+                        if (worksheet.Dimension == null)
+                        {
+                            continue; // 跳过空工作表
+                        }
+
                         if (!变量.附件表数据.ContainsKey(worksheet.Name))
                         {
                             变量.附件表数据[worksheet.Name] = new List<string>();
                         }
 
-                        int 总长度米行号 = -1;
+                        // 查找包含"序号"的行（扩大搜索范围）
+                        int 序号行号 = -1;
+                        int 序号列号 = -1;
+                        int 条数列号 = -1;
+                        int 总长度列号 = -1;
+                        int 标签码列号 = -1;
+                        int 标签码1列号 = -1;
+                        int 标签码2列号 = -1;
 
-                        for (int i = 1; i <= worksheet.Dimension.End.Row; i++)
+                        // 扩大搜索范围到前20行，但不超过工作表的实际行数
+                        int maxSearchRow = Math.Min(20, worksheet.Dimension.End.Row);
+                        for (int row = 1; row <= maxSearchRow; row++)
                         {
-                            var cellValue = worksheet.Cells[i, 18].Value;
-                            if (cellValue != null && cellValue.ToString().Contains("总长度 (米)"))
+                            for (int col = 1; col <= worksheet.Dimension.End.Column; col++)
                             {
-                                总长度米行号 = i;
-                                break;
+                                var cellValue = worksheet.Cells[row, col].Text?.Trim() ?? "";
+                                if (cellValue.Contains("序号"))
+                                {
+                                    序号行号 = row;
+                                    序号列号 = col;
+                                    break;
+                                }
+                            }
+                            if (序号行号 != -1) break;
+                        }
+
+                        // 如果没找到序号行，跳过这个工作表
+                        if (序号行号 == -1)
+                        {
+                            continue;
+                        }
+
+                        // 在标题行查找其他列
+                        for (int col = 1; col <= worksheet.Dimension.End.Column; col++)
+                        {
+                            var cellValue = worksheet.Cells[序号行号, col].Text?.Trim() ?? "";
+                            if (cellValue.Contains("条数"))
+                            {
+                                条数列号 = col;
+                            }
+                            if (cellValue.Contains("总长度"))
+                            {
+                                总长度列号 = col;
+                            }
+                            if (cellValue.Contains("标签码") && !cellValue.Contains("标签码1") && !cellValue.Contains("标签码2"))
+                            {
+                                标签码列号 = col;
+                            }
+                            if (cellValue.Contains("标签码1"))
+                            {
+                                标签码1列号 = col;
+                            }
+                            if (cellValue.Contains("标签码2"))
+                            {
+                                标签码2列号 = col;
                             }
                         }
 
-                        if (总长度米行号 >= 0)
+                        // 验证必要的列是否都找到
+                        if (序号列号 == -1 || 条数列号 == -1 || 总长度列号 == -1)
                         {
-                            for (int row = 总长度米行号 + 1; row <= worksheet.Dimension.End.Row; row++)
-                            {
-                                var cellA = worksheet.Cells[row, 1];
-                                var cellO = worksheet.Cells[row, 15];
-                                var cellR = worksheet.Cells[row, 18];
+                            MessageBox.Show($"工作表 {worksheet.Name} 中未找到必要的列标题", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            continue;
+                        }
 
-                                if (cellA.Value != null && cellO.Value != null && cellR.Value != null)
+                        // 处理数据（从标题行的下一行开始，确保不超出工作表范围）
+                        for (int row = 序号行号 + 1; row <= worksheet.Dimension.End.Row; row++)
+                        {
+                            try
+                            {
+                                var cell序号 = worksheet.Cells[row, 序号列号];
+                                var cell条数 = worksheet.Cells[row, 条数列号];
+                                var cell总米数 = worksheet.Cells[row, 总长度列号];
+
+                                string 标签码 = "";
+                                string 标签码1 = "";
+                                string 标签码2 = "";
+
+                                if (标签码列号 != -1)
                                 {
-                                    // 检查是否为错误值
-                                    if (cellA.Value is ExcelErrorValue || cellO.Value is ExcelErrorValue || cellR.Value is ExcelErrorValue)
+                                    标签码 = worksheet.Cells[row, 标签码列号].Text?.Trim() ?? "";
+                                }
+                                else if (标签码1列号 != -1 || 标签码2列号 != -1)
+                                {
+                                    标签码1 = 标签码1列号 != -1 ? worksheet.Cells[row, 标签码1列号].Text?.Trim() ?? "" : "";
+                                    标签码2 = 标签码2列号 != -1 ? worksheet.Cells[row, 标签码2列号].Text?.Trim() ?? "" : "";
+                                }
+
+                                if (cell序号.Value != null && cell条数.Value != null && cell总米数.Value != null)
+                                {
+                                    if (cell序号.Value is ExcelErrorValue || cell条数.Value is ExcelErrorValue || cell总米数.Value is ExcelErrorValue)
                                     {
-                                        continue; // 跳过错误值
+                                        continue;
                                     }
 
-                                    string 内容A = cellA.Value.ToString();
-                                    int 内容O = Convert.ToInt32(cellO.Value);
-                                    double 内容R = Convert.ToDouble(cellR.Value);
+                                    string 序号 = cell序号.Value.ToString();
+                                    int 条数;
+                                    double 总米数;
 
-                                    if (内容O > 1)
+                                    if (int.TryParse(cell条数.Value.ToString(), out 条数) &&
+                                        double.TryParse(cell总米数.Value.ToString(), out 总米数))
                                     {
-                                        double 分割后的R值 = 内容R / 内容O;
-                                        for (int i = 0; i < 内容O; i++)
+                                        if (条数 > 1)
                                         {
-                                            变量.附件表数据[worksheet.Name].Add($"{内容A}, {1}, {分割后的R值}");
+                                            double 分割后的米数 = 总米数 / 条数;
+                                            for (int i = 0; i < 条数; i++)
+                                            {
+                                                变量.附件表数据[worksheet.Name].Add($"{序号}, {1}, {分割后的米数}, {标签码}, {标签码1}, {标签码2}");
+                                            }
+                                        }
+                                        else
+                                        {
+                                            变量.附件表数据[worksheet.Name].Add($"{序号}, {条数}, {总米数}, {标签码}, {标签码1}, {标签码2}");
                                         }
                                     }
-                                    else
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                MessageBox.Show($"处理第 {row} 行时出错：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                continue;
+                            }
+                        }
+                        // 处理完所有数据后，计算总米数和
+                        if (变量.附件表数据[worksheet.Name].Count > 0)
+                        {
+                            double 总米数和 = 0;
+                            foreach (string 记录 in 变量.附件表数据[worksheet.Name])
+                            {
+                                string[] 数据项 = 记录.Split(',');
+                                if (数据项.Length >= 3 && double.TryParse(数据项[2].Trim(), out double 总米数))
+                                {
+                                    总米数和 += 总米数;
+                                }
+                            }
+
+                            // 四舍五入到小数点后三位
+                            总米数和 = Math.Round(总米数和, 3);
+
+                            // 添加总计记录
+                            变量.附件表数据[worksheet.Name].Add($"总计, , {总米数和:F3}, , , ");
+                            //MessageBox.Show($"工作表 {worksheet.Name} 的总米数和: {总米数和:F3}");
+
+                            // 如果订单已导入，进行数量比对
+                            if (!string.IsNullOrEmpty(uiTextBox_订单地址.Text) && 变量.订单出线字典 != null && 变量.订单出线字典.Any())
+                            {
+                                foreach (var 订单 in 变量.订单出线字典)
+                                {
+                                    foreach (var (型号, 出线方式, F列内容, 销售数量) in 订单.Value)
                                     {
-                                        变量.附件表数据[worksheet.Name].Add($"{内容A}, {内容O}, {内容R}");
+                                        // 将销售数量四舍五入到三位小数进行比较
+                                        double 订单数量 = Math.Round(销售数量, 3);
+                                        if (Math.Abs(订单数量 - 总米数和) < 0.001) // 使用小于0.001的差值来判断相等
+                                        {
+                                            var 匹配 = new 匹配信息(订单.Key, 型号, 订单数量, worksheet.Name, 总米数和);
+                                            变量.订单附件匹配列表.Add(匹配);
+                                            //MessageBox.Show(匹配.ToString(), "找到匹配", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                            // 使用AppendText替代MessageBox
+                                            //uiTextBox_状态.AppendText(匹配.ToString() + Environment.NewLine);
+                                            //uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
+                                        }
                                     }
+                                }
+
+                                // 检查是否找到匹配
+                                var 当前工作表匹配 = 变量.订单附件匹配列表.FirstOrDefault(x => x.工作表名称 == worksheet.Name);
+                                if (当前工作表匹配 != null)
+                                {
+                                    // 找到匹配，显示匹配信息
+                                    uiTextBox_状态.AppendText(当前工作表匹配.ToString() + Environment.NewLine);
+                                    uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
+                                }
+                                else
+                                {
+                                    // 未找到匹配，显示提示信息
+                                    uiTextBox_状态.AppendText($"工作表 {worksheet.Name} (总米数: {总米数和:F3}) 未找到匹配的订单" + Environment.NewLine);
+                                    uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
                                 }
                             }
                         }
                     }
+
+                    uiTextBox_状态.AppendText("附件导入完成" + Environment.NewLine);
+                    uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
                 }
             }
             catch (Exception ex)
@@ -358,7 +494,7 @@ namespace 包装计算
         private void button_开始处理_Click(object sender, EventArgs e)
         {
             foreach (var (型号, 出线方式, F列内容, 销售数量) in 变量.订单出线字典[变量.订单编号])
-            {        
+            {
                 string 出线方式字符串 = 出线方式.Count > 0 ? string.Join("，", 出线方式) : "无";
                 MessageBox.Show($"型号：{型号}\n出线方式：{出线方式字符串}\nF列内容：{F列内容}\n销售数量：{销售数量}");
                 //uiTextBox_状态.AppendText($"当前出线方式: {出线方式字符串}" + Environment.NewLine);
@@ -391,12 +527,7 @@ namespace 包装计算
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
                 );
-
-
-
             }
-
-            
         }
 
         private void 开始组合(string 型号SHEET, string 产品型号, string 订单编号)
@@ -532,7 +663,7 @@ namespace 包装计算
 
                 uiTextBox_状态.Invoke((MethodInvoker)(() =>
         {
-            uiTextBox_状态.AppendText("订单处理完成" + Environment.NewLine);
+            uiTextBox_状态.AppendText("订单导入完成" + Environment.NewLine);
             uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
         }));
             }

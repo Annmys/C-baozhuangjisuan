@@ -20,6 +20,8 @@ namespace 包装计算
 
         public List<double> 测试 = new List<double>();
 
+        public List<匹配信息> 订单附件匹配列表 = new List<匹配信息>();
+
         public List<string> 公司型号列表 = new List<string>
         { "F10","F15","F16","F21","F22","F23","F1212","F2008","F2010","F2012","F2019","F2222" };
 
@@ -43,6 +45,8 @@ namespace 包装计算
             new 灯带尺寸("F2219",2.2,1.9),
             new 灯带尺寸("F2222",2.2,2.2)
         };
+
+
 
 
     }
@@ -86,3 +90,32 @@ public class 数据项
     }
 }
 
+
+
+public class 匹配信息
+{
+    public string 订单编号 { get; set; }
+    public string 产品型号 { get; set; }
+    public double 销售数量 { get; set; }
+    public string 工作表名称 { get; set; }
+    public double 工作表总米数 { get; set; }
+
+    public 匹配信息(string 订单编号, string 产品型号, double 销售数量, string 工作表名称, double 工作表总米数)
+    {
+        this.订单编号 = 订单编号;
+        this.产品型号 = 产品型号;
+        this.销售数量 = 销售数量;
+        this.工作表名称 = 工作表名称;
+        this.工作表总米数 = 工作表总米数;
+    }
+
+    public override string ToString()
+    {
+        return $"找到匹配的订单和附件：\n" +
+               $"订单编号：{订单编号}\n" +
+               $"产品型号：{产品型号}\n" +
+               $"销售数量：{销售数量:F3}\n" +
+               $"匹配工作表：{工作表名称}\n" +
+               $"工作表总米数：{工作表总米数:F3}";
+    }
+}
