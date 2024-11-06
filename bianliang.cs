@@ -10,11 +10,13 @@ namespace 包装计算
     {
         public string? 订单excel地址;
         public string? 附件excel地址;
+        public string? 订单编号;
 
         public List<string> 订单型号列表 = new List<string>();
         public Dictionary<string, List<string>> 附件表数据 = new Dictionary<string, List<string>>();
 
-        public Dictionary<string, List<(string 型号, HashSet<string> 出线方式, string F列内容)>> 订单出线字典;
+        // 在变量类中更新订单出线字典的定义
+        public Dictionary<string, List<(string 型号, HashSet<string> 出线方式, string F列内容, double 销售数量)>> 订单出线字典;
 
         public List<double> 测试 = new List<double>();
 
@@ -83,3 +85,4 @@ public class 数据项
         标志 = id;
     }
 }
+
