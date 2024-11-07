@@ -39,6 +39,7 @@
             uiTextBox_状态 = new Sunny.UI.UITextBox();
             uiButton1 = new Sunny.UI.UIButton();
             uiStyleManager2 = new Sunny.UI.UIStyleManager(components);
+            uiTextBox_订单地址.SuspendLayout();
             SuspendLayout();
             // 
             // button_订单导入
@@ -79,6 +80,7 @@
             // 
             // uiTextBox_订单地址
             // 
+            uiTextBox_订单地址.Controls.Add(uiButton1);
             uiTextBox_订单地址.Font = new Font("宋体", 12F);
             uiTextBox_订单地址.Location = new Point(4, 40);
             uiTextBox_订单地址.Margin = new Padding(4, 5, 4, 5);
@@ -124,21 +126,21 @@
             // uiButton1
             // 
             uiButton1.Font = new Font("宋体", 12F, FontStyle.Regular, GraphicsUnit.Point, 134);
-            uiButton1.Location = new Point(291, 183);
+            uiButton1.Location = new Point(194, 2);
             uiButton1.MinimumSize = new Size(1, 1);
             uiButton1.Name = "uiButton1";
-            uiButton1.Size = new Size(53, 23);
+            uiButton1.Size = new Size(55, 26);
             uiButton1.TabIndex = 18;
             uiButton1.Text = "uiButton1";
             uiButton1.TipsFont = new Font("宋体", 9F, FontStyle.Regular, GraphicsUnit.Point, 134);
+            uiButton1.Visible = false;
             uiButton1.Click += uiButton1_Click;
             // 
             // Form1
             // 
             AutoScaleMode = AutoScaleMode.None;
             BackgroundImageLayout = ImageLayout.None;
-            ClientSize = new Size(354, 214);
-            Controls.Add(uiButton1);
+            ClientSize = new Size(345, 214);
             Controls.Add(uiTextBox_状态);
             Controls.Add(uiTextBox_附件地址);
             Controls.Add(uiTextBox_订单地址);
@@ -148,6 +150,7 @@
             Name = "Form1";
             Text = "包装资料生成(C#版)";
             ZoomScaleRect = new Rectangle(15, 15, 433, 220);
+            uiTextBox_订单地址.ResumeLayout(false);
             ResumeLayout(false);
         }
 

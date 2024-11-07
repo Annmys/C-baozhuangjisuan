@@ -80,13 +80,26 @@ public class 数据项
     public string 内容O { get; set; }
     public double 内容R { get; set; }
     public string 标志 { get; set; }
+    public int 出现次数 { get; set; }  // 新增属性
 
+    // 原有的构造函数
     public 数据项(string a, string o, double r, string id)
     {
         内容A = a;
         内容O = o;
         内容R = r;
         标志 = id;
+        出现次数 = 1;  // 默认值
+    }
+
+    // 新增带出现次数的构造函数
+    public 数据项(string a, string o, double r, string id, int count)
+    {
+        内容A = a;
+        内容O = o;
+        内容R = r;
+        标志 = id;
+        出现次数 = count;
     }
 }
 
@@ -96,14 +109,16 @@ public class 匹配信息
 {
     public string 订单编号 { get; set; }
     public string 产品型号 { get; set; }
+    public HashSet<string> 出线方式 { get; set; }  // 新增
     public double 销售数量 { get; set; }
     public string 工作表名称 { get; set; }
     public double 工作表总米数 { get; set; }
 
-    public 匹配信息(string 订单编号, string 产品型号, double 销售数量, string 工作表名称, double 工作表总米数)
+    public 匹配信息(string 订单编号, string 产品型号, HashSet<string> 出线方式, double 销售数量, string 工作表名称, double 工作表总米数)
     {
         this.订单编号 = 订单编号;
         this.产品型号 = 产品型号;
+        this.出线方式 = 出线方式;  // 新增
         this.销售数量 = 销售数量;
         this.工作表名称 = 工作表名称;
         this.工作表总米数 = 工作表总米数;
@@ -111,9 +126,11 @@ public class 匹配信息
 
     public override string ToString()
     {
+        string 出线方式字符串 = 出线方式.Count > 0 ? string.Join("，", 出线方式) : "无";  // 修改
         return $"找到匹配的订单和附件：\n" +
                $"订单编号：{订单编号}\n" +
                $"产品型号：{产品型号}\n" +
+               $"出线方式：{出线方式字符串}\n" +  // 新增
                $"销售数量：{销售数量:F3}\n" +
                $"匹配工作表：{工作表名称}\n" +
                $"工作表总米数：{工作表总米数:F3}";
