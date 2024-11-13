@@ -198,9 +198,9 @@ namespace 包装计算
                     {
                         基础出线方式.Add("端部出线");
                     }
-                    if (当前行规格型号.Contains("侧面出线"))
+                    if (当前行规格型号.Contains("侧部出线"))
                     {
-                        基础出线方式.Add("侧面出线");
+                        基础出线方式.Add("侧部出线");
                     }
                     if (当前行规格型号.Contains("底部出线"))
                     {
@@ -606,6 +606,8 @@ namespace 包装计算
                 return;
             }
 
+            新包装 包装查询 = new 新包装();
+
             foreach (var 匹配信息 in 变量.订单附件匹配列表)
             {
                 string 型号SHEET = 匹配信息.工作表名称;
@@ -619,22 +621,57 @@ namespace 包装计算
                     continue;
                 }
 
-                // 设置默认的包装容积（如果需要的话）
-                变量.查找组合_基数 = 1420 * 0.7;  // 这里可以根据实际情况设置默认值
+                // 获取订单中该型号的出线方式
+                var 订单出线信息 = 变量.订单出线字典[匹配信息.订单编号]
+                    .FirstOrDefault(x => x.Item1 == 产品型号);
+
+                if (订单出线信息 == default)
+                {
+                    MessageBox.Show($"未找到型号 {产品型号} 的出线方式信息", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    continue;
+                }
+
+                // 确定包装类型
+                string 包装类型;
+                if (订单出线信息.Item2.Count == 0)
+                {
+                    包装类型 = "多条或短条包装";
+                }
+                else
+                {
+                    包装类型 = 订单出线信息.Item2.First(); // 使用第一个出线方式
+                }
+
+                // 查找匹配的包装资料
+                var 包装资料 = 包装查询.查找包装资料(产品型号, 包装类型);
+
+                if (包装资料 != null)
+                {
+                    // 计算实际可用面积
+                    double 实际面积 = (包装资料.总有效面积-包装资料.内撑纸卡面积)*0.8 ;
+                    //double 实际面积 = (包装资料.总有效面积-包装资料.圆形平卡面积)*0.7 ;
+                    
+
+                    // 设置实际可用容积
+                    变量.查找组合_基数 = 实际面积;
+
+                    uiTextBox_状态.AppendText($"型号 {产品型号} 使用包装: {包装资料.包装名称}" + Environment.NewLine);
+                    uiTextBox_状态.AppendText($"总面积: {包装资料.总有效面积}" + Environment.NewLine);
+                    uiTextBox_状态.AppendText($"实际可用面积: {实际面积}" + Environment.NewLine);
+                    uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
+                }
+                else
+                {
+                    MessageBox.Show($"未找到型号 {产品型号} 出线方式 {包装类型} 的匹配包装", "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    // 使用默认容积
+                    变量.查找组合_基数 = 1420-706;
+
+                    uiTextBox_状态.AppendText($"型号 {产品型号} 使用默认包装容积: {变量.查找组合_基数}" + Environment.NewLine);
+                    uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
+                }
 
                 // 调用修改后的开始组合方法
                 开始组合(型号SHEET, 产品型号, 匹配信息.订单编号);
-
-                // 显示选中灯带的信息
-                //MessageBox.Show(
-                //    $"型号: {灯带尺寸.型号}\n" +
-                //    $"宽度: {灯带尺寸.横截面宽度}\n" +
-                //    $"高度: {灯带尺寸.横截面高度}\n" +
-                //    $"每厘米面积: {灯带尺寸.每厘米面积}",
-                //    "灯带信息",
-                //    MessageBoxButtons.OK,
-                //    MessageBoxIcon.Information
-                //);
             }
         }
 
@@ -891,8 +928,25 @@ namespace 包装计算
             uiTextBox_状态.AppendText($"结果已保存到 {文件路径}" + Environment.NewLine);
             uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
 
+            // 获取BOM物料码
+            新包装 包装查询 = new 新包装();
+            string? BOM物料码 = null;
 
-            // 在保存完详细Excel后，创建或更新汇总Excel
+            // 从订单出线字典中获取出线方式
+            var 订单出线信息 = 变量.订单出线字典[订单编号]
+                .FirstOrDefault(x => x.Item1 == 灯带尺寸对象.型号);
+
+            if (订单出线信息 != default)
+            {
+                string 包装类型 = 订单出线信息.Item2.Count == 0 ? "多条或短条包装" : 订单出线信息.Item2.First();
+                var 包装资料 = 包装查询.查找包装资料(灯带尺寸对象.型号, 包装类型);
+                if (包装资料 != null)
+                {
+                    BOM物料码 = 包装资料.半成品BOM物料码;
+                }
+            }
+
+            // 创建或更新汇总Excel
             string 汇总文件路径 = Path.Combine("输出结果", 订单编号, "包装汇总.xlsx");
             FileInfo 汇总文件信息 = new FileInfo(汇总文件路径);
 
@@ -907,10 +961,10 @@ namespace 包装计算
                     if (汇总表.Dimension != null)
                     {
                         int lastRow = 汇总表.Dimension.End.Row;
-                        for (int row = lastRow; row >= 2; row--)  // 从后向前遍历，跳过表头
+                        for (int row = lastRow; row >= 2; row--)
                         {
                             bool isRowEmpty = true;
-                            for (int col = 1; col <= 3; col++)
+                            for (int col = 1; col <= 4; col++) // 更新为4列
                             {
                                 if (!string.IsNullOrWhiteSpace(汇总表.Cells[row, col].Text))
                                 {
@@ -933,10 +987,11 @@ namespace 包装计算
                     汇总表.Cells[1, 1].Value = "工作表名称";
                     汇总表.Cells[1, 2].Value = "型号";
                     汇总表.Cells[1, 3].Value = "包装盒数";
+                    汇总表.Cells[1, 4].Value = "半成品BOM物料码";
                 }
 
-                // 获取实际的最后一行（排除空行后）
-                int actualLastRow = 1;  // 从表头开始
+                // 获取实际的最后一行
+                int actualLastRow = 1;
                 if (汇总表.Dimension != null)
                 {
                     for (int row = 2; row <= 汇总表.Dimension.End.Row; row++)
@@ -968,28 +1023,31 @@ namespace 包装计算
                 if (已存在)
                 {
                     汇总表.Cells[更新行号, 3].Value = 组合结果.Count;
+                    汇总表.Cells[更新行号, 4].Value = BOM物料码 ?? "未找到匹配包装";
                 }
                 else
                 {
                     汇总表.Cells[actualLastRow + 1, 1].Value = 工作表名称;
                     汇总表.Cells[actualLastRow + 1, 2].Value = 灯带尺寸对象.型号;
                     汇总表.Cells[actualLastRow + 1, 3].Value = 组合结果.Count;
+                    汇总表.Cells[actualLastRow + 1, 4].Value = BOM物料码 ?? "未找到匹配包装";
                 }
 
                 // 自动调整列宽
                 汇总表.Column(1).AutoFit();
                 汇总表.Column(2).AutoFit();
                 汇总表.Column(3).AutoFit();
+                汇总表.Column(4).AutoFit();
 
                 // 更新表格样式
-                var headerRange = 汇总表.Cells[1, 1, 1, 3];
+                var headerRange = 汇总表.Cells[1, 1, 1, 4];
                 headerRange.Style.Font.Bold = true;
                 headerRange.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
                 headerRange.Style.Fill.BackgroundColor.SetColor(Color.LightGray);
 
                 // 获取最新的数据范围
                 int finalLastRow = Math.Max(actualLastRow, actualLastRow + (已存在 ? 0 : 1));
-                var dataRange = 汇总表.Cells[1, 1, finalLastRow, 3];
+                var dataRange = 汇总表.Cells[1, 1, finalLastRow, 4];
                 dataRange.Style.Border.Top.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
                 dataRange.Style.Border.Left.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
                 dataRange.Style.Border.Right.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
