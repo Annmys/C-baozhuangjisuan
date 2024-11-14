@@ -55,10 +55,10 @@ namespace 包装计算
                 "天盒", "地盒", "加强平卡", "上圆纸板", "下圆纸板",
                 "圆纸管", "内撑纸卡", "内五角平卡", "圆形平卡"
             },
-            系统编码 = "1006.045137",
+            系统编码 = "1006.045141",
             装箱数量 = 1,
             系统尺寸 = "1K8K纸质",
-            半成品BOM物料码 = "30.23.010101",
+            半成品BOM物料码 = "30.23.010103",
             总有效面积 = 1734,    //1
             内撑纸卡面积 = 314,  //2
             圆形平卡面积 = 706.5,   //3
@@ -567,15 +567,34 @@ namespace 包装计算
             // 其他包装资料...
         };
 
-        public 新包装资料? 查找包装资料(string 产品型号, string 产品类型)
+        
+        public 新包装资料? 根据BOM物料码查找包装资料(string BOM物料码)
         {
-            var 包装资料 = 装箱产品列表
-                .FirstOrDefault(包装 =>
-                    包装.装箱产品型号 != null && 包装.装箱产品型号.Contains(产品型号) &&
-                    包装.装箱产品类型 != null && 包装.装箱产品类型.Any(类型 => 类型.Contains(产品类型)));
-
-            return 包装资料 ?? null; // 明确返回 null，避免警告
+            return 装箱产品列表.FirstOrDefault(x => x.半成品BOM物料码 == BOM物料码);
         }
+
+        public 新包装资料? 查找600mm包装资料(string 型号, string 查询类型)
+        {
+            // 优先查找600mm的包装
+            var 匹配包装 = 装箱产品列表.FirstOrDefault(x =>
+                x.包装名称.Contains("600mm") &&
+                x.装箱产品型号.Contains(型号) &&
+                x.装箱产品类型.Any(t => t.Contains(查询类型)));
+
+            return 匹配包装;
+        }
+
+        public 新包装资料? 查找包装资料(string 型号, string 查询类型)
+        {
+            // 现有的查找逻辑保持不变
+            var 匹配包装 = 装箱产品列表.FirstOrDefault(x =>
+                x.装箱产品型号.Contains(型号) &&
+                x.装箱产品类型.Any(t => t.Contains(查询类型)));
+
+            return 匹配包装;
+        }
+
+
     }
 
 

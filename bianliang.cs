@@ -109,30 +109,52 @@ public class 匹配信息
 {
     public string 订单编号 { get; set; }
     public string 产品型号 { get; set; }
-    public HashSet<string> 出线方式 { get; set; }  // 新增
+    public HashSet<string> 出线方式 { get; set; }
     public double 销售数量 { get; set; }
     public string 工作表名称 { get; set; }
     public double 工作表总米数 { get; set; }
+    public Dictionary<string, string> A列序号字母映射 { get; set; } = new Dictionary<string, string>();  // 新增属性，用于存储A列序号与字母的映射
 
     public 匹配信息(string 订单编号, string 产品型号, HashSet<string> 出线方式, double 销售数量, string 工作表名称, double 工作表总米数)
     {
         this.订单编号 = 订单编号;
         this.产品型号 = 产品型号;
-        this.出线方式 = 出线方式;  // 新增
+        this.出线方式 = 出线方式;
         this.销售数量 = 销售数量;
         this.工作表名称 = 工作表名称;
         this.工作表总米数 = 工作表总米数;
     }
 
+    // 新增方法：添加A列序号映射
+    
+
+    public string Sheet序号前缀 { get; private set; } = "";  // 新增属性，用于存储工作表中A列的序号前缀（如"R"）
+
+    public void 设置Sheet序号前缀(List<string> 表数据)
+    {
+        if (表数据.Count > 0)
+        {
+            // 获取第一行数据的序号部分
+            string 首行数据 = 表数据[0];
+            string 序号 = 首行数据.Split(',')[0].Trim();  // 获取逗号前的序号部分
+            // 提取序号中的字母部分
+            Sheet序号前缀 = new string(序号.TakeWhile(c => !char.IsDigit(c)).ToArray());
+        }
+    }
+
+
     public override string ToString()
     {
-        string 出线方式字符串 = 出线方式.Count > 0 ? string.Join("，", 出线方式) : "无";  // 修改
+        string 出线方式字符串 = 出线方式.Count > 0 ? string.Join("，", 出线方式) : "无";
+        string 序号映射字符串 = string.Join(", ", A列序号字母映射.Select(x => $"{x.Key}: {x.Value}"));
+
         return $"找到匹配的订单和附件：\n" +
                $"订单编号：{订单编号}\n" +
                $"产品型号：{产品型号}\n" +
-               $"出线方式：{出线方式字符串}\n" +  // 新增
+               $"出线方式：{出线方式字符串}\n" +
                $"销售数量：{销售数量:F3}\n" +
                $"匹配工作表：{工作表名称}\n" +
-               $"工作表总米数：{工作表总米数:F3}";
+               $"工作表总米数：{工作表总米数:F3}\n" +
+               $"A列序号映射：{序号映射字符串}";
     }
 }
