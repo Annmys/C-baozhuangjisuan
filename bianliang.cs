@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
+
 namespace 包装计算
 {
     public class 变量
@@ -107,6 +108,7 @@ public class 数据项
 
 public class 匹配信息
 {
+    
     public string 订单编号 { get; set; }
     public string 产品型号 { get; set; }
     public HashSet<string> 出线方式 { get; set; }
@@ -114,6 +116,21 @@ public class 匹配信息
     public string 工作表名称 { get; set; }
     public double 工作表总米数 { get; set; }
     public Dictionary<string, string> A列序号字母映射 { get; set; } = new Dictionary<string, string>();  // 新增属性，用于存储A列序号与字母的映射
+                                                                                                  // 添加包装资料属性
+                                                                                                 
+    public object? 选中包装资料 { get; set; }  // 暂时使用object类型
+
+    // 添加获取BOM物料码的方法
+    public string? 获取BOM物料码()
+    {
+        if (选中包装资料 != null)
+        {
+            // 使用动态类型来访问属性
+            dynamic 包装 = 选中包装资料;
+            return 包装.半成品BOM物料码;
+        }
+        return null;
+    }
 
     public 匹配信息(string 订单编号, string 产品型号, HashSet<string> 出线方式, double 销售数量, string 工作表名称, double 工作表总米数)
     {

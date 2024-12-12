@@ -737,22 +737,38 @@ namespace 包装计算
                 // 获取候选包装列表
                 var 候选包装列表 = 包装查询.获取候选包装列表(产品型号, 包装类型);
 
+                //// 检查是否有候选包装
+                //if (候选包装列表 != null && 候选包装列表.Any())
+                //{
+                //    // 构建显示字符串
+                //    StringBuilder sb = new StringBuilder();
+                //    sb.AppendLine("候选包装列表:");
+
+                //    foreach (var 包装 in 候选包装列表)
+                //    {
+                //        sb.AppendLine($"----------------------------------------");
+                //        sb.AppendLine($"包装名称: {包装.包装名称}");
+                //        sb.AppendLine($"系统编码: {包装.半成品BOM物料码}");
+
+                //    }
+
+                //    // 显示信息框
+                //    MessageBox.Show(sb.ToString(), "候选包装列表", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                //}
+
+
                 if (候选包装列表.Any())
                 {
-                    // 获取产品长度 - 这里需要根据您的实际属性名称修改
-                    double 产品长度 = 0;
-                    // 假设长度存储在其他属性中，比如：
-                    if (变量.附件表数据.ContainsKey(型号SHEET))
-                    {
-                        var 数据 = 变量.附件表数据[型号SHEET].FirstOrDefault()?.Split(',');
-                        if (数据 != null && 数据.Length > 2 && double.TryParse(数据[2].Trim(), out double 长度))
-                        {
-                            产品长度 = 长度;
-                        }
-                    }
+                    int 数据条数 = 变量.附件表数据[型号SHEET].Count - 1;
 
-                    // 选择最佳包装   测试V0.7
-                    var 包装资料 = 包装查询.选择最佳包装(候选包装列表, 产品长度);
+                    //MessageBox.Show(数据条数.ToString(), "数据条数", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // 选择最佳包装   测试V0.9
+                    var 包装资料 = 包装查询.选择最佳包装(候选包装列表, 数据条数);
+
+                    //MessageBox.Show(包装资料.半成品BOM物料码, "数据条数", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                    // 保存完整的包装资料到匹配信息中
+                    匹配信息.选中包装资料 = 包装资料;  // 这一行是关键
 
                     if (包装资料 != null)
                     {
@@ -765,14 +781,12 @@ namespace 包装计算
                         uiTextBox_状态.AppendText($"型号 {产品型号} 使用包装: {包装资料.包装名称}" + Environment.NewLine);
                         uiTextBox_状态.AppendText($"总面积: {包装资料.总有效面积}" + Environment.NewLine);
                         uiTextBox_状态.AppendText($"实际可用面积: {实际面积}" + Environment.NewLine);
+                        uiTextBox_状态.AppendText($"灯带数量: {数据条数}条" + Environment.NewLine);
 
                         // 添加包装类型信息
-                        string 包装类型说明 = 包装资料.是多条短条专用包装 ? "多条专用包装" : "普通包装";
+                        string 包装类型说明 = 包装资料.是多条短条专用包装 ? "多条专用包装" :
+                                          包装资料.允许多条包装 ? "多条包装" : "普通包装";
                         uiTextBox_状态.AppendText($"包装类型: {包装类型说明}" + Environment.NewLine);
-
-                        // 添加长度限制信息
-                        uiTextBox_状态.AppendText($"产品长度: {产品长度}米" + Environment.NewLine);
-                        uiTextBox_状态.AppendText($"包装最大电线长度: {包装资料.最大电线长度}米" + Environment.NewLine);
                         uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
                     }
                     else
@@ -1151,53 +1165,23 @@ namespace 包装计算
             uiTextBox_状态.AppendText($"结果已保存到 {文件路径}" + Environment.NewLine);
             uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
 
-            // 获取BOM物料码和包装资料
-            新包装 包装查询 = new 新包装();
-            新包装资料? 包装资料 = null;
+            // 获取BOM物料码 - 直接使用之前保存的包装信息
+            var 匹配信息 = 变量.订单附件匹配列表.FirstOrDefault(x =>
+                x.工作表名称 == 工作表名称);
+
+            dynamic? 包装资料 = null;
             string? BOM物料码 = null;
 
-            // 从订单出线字典中获取出线方式
-            var 订单出线信息 = 变量.订单出线字典[订单编号]
-                .FirstOrDefault(x => x.Item1 == 灯带尺寸对象.型号);
-
-            if (订单出线信息 != default)
+            if (匹配信息?.选中包装资料 != null)
             {
-                // 根据组合结果中的米数来判断是否使用600mm包装
-                bool 使用600mm包装 = false;
-                foreach (var combination in 组合结果)
-                {
-                    // 计算当前组合的总米数
-                    double 组合米数 = combination.Sum() / (灯带尺寸对象.每厘米面积 * 100);
-                    if (组合米数 < 6)
-                    {
-                        使用600mm包装 = true;
-                        break;
-                    }
-                }
-
-                string 包装类型 = 订单出线信息.Item2.Count == 0 ? "多条或短条包装" : 订单出线信息.Item2.First();
-
-                if (使用600mm包装)
-                {
-                    包装资料 = 包装查询.查找600mm包装资料(灯带尺寸对象.型号, 包装类型);
-                    uiTextBox_状态.AppendText($"使用600mm包装 - 型号: {灯带尺寸对象.型号}" + Environment.NewLine);
-                }
-
-                if (包装资料 == null)
-                {
-                    包装资料 = 包装查询.查找包装资料(灯带尺寸对象.型号, 包装类型);
-                    uiTextBox_状态.AppendText($"使用标准包装 - 型号: {灯带尺寸对象.型号}" + Environment.NewLine);
-                }
-
-                if (包装资料 != null)
-                {
-                    BOM物料码 = 包装资料.半成品BOM物料码;
-                    uiTextBox_状态.AppendText($"找到匹配包装 - BOM物料码: {BOM物料码}" + Environment.NewLine);
-                }
-                else
-                {
-                    uiTextBox_状态.AppendText($"未找到匹配包装 - 型号: {灯带尺寸对象.型号}, 包装类型: {包装类型}" + Environment.NewLine);
-                }
+                包装资料 = 匹配信息.选中包装资料;
+                BOM物料码 = 包装资料.半成品BOM物料码;
+                uiTextBox_状态.AppendText($"使用已选择的包装 - BOM物料码: {BOM物料码}" + Environment.NewLine);
+            }
+            else
+            {
+                uiTextBox_状态.AppendText($"警告：未找到之前选择的包装信息 - 工作表: {工作表名称}" + Environment.NewLine);
+                return; // 如果没有包装信息，直接返回
             }
 
             // 创建或更新汇总Excel
@@ -1495,22 +1479,11 @@ namespace 包装计算
                         foreach (var 纸箱信息 in 纸箱组合列表)
                         {
                             汇总表.Cells[currentRow, 2].Value = "纸箱";
-                            汇总表.Cells[currentRow, 3].Value = 纸箱信息.编号;
-                            // 根据物料编码获取对应的系统尺寸
-                            string 系统尺寸 = "";
-                            if (纸箱信息.Item3 == 1 && !string.IsNullOrEmpty(包装资料.单盒装选用_系统尺寸))
-                                系统尺寸 = 包装资料.单盒装选用_系统尺寸;
-                            else if (纸箱信息.Item3 == 2 && !string.IsNullOrEmpty(包装资料.二盒装选用_系统尺寸))
-                                系统尺寸 = 包装资料.二盒装选用_系统尺寸;
-                            else if (纸箱信息.Item3 == 3 && !string.IsNullOrEmpty(包装资料.三盒装选用_系统尺寸))
-                                系统尺寸 = 包装资料.三盒装选用_系统尺寸;
-                            else if (纸箱信息.Item3 == 5 && !string.IsNullOrEmpty(包装资料.五盒装选用_系统尺寸))
-                                系统尺寸 = 包装资料.五盒装选用_系统尺寸;
-
-                            汇总表.Cells[currentRow, 4].Value = 系统尺寸;  // 使用对应的系统尺寸
-                            汇总表.Cells[currentRow, 5].Value = 纸箱信息.数量;
+                            汇总表.Cells[currentRow, 3].Value = 纸箱信息.Item1;  // 使用Item1获取编号
+                            汇总表.Cells[currentRow, 4].Value = 获取系统尺寸(纸箱信息.Item3, 包装资料);  // 使用Item3获取盒数
+                            汇总表.Cells[currentRow, 5].Value = 纸箱信息.Item2;  // 使用Item2获取数量
                             汇总表.Cells[currentRow, 6].Value = "#N/A";
-                            汇总表.Cells[currentRow, 9].Value = $"{纸箱信息.盒数}盒装标准";
+                            汇总表.Cells[currentRow, 9].Value = $"{纸箱信息.Item3}盒装标准";
                             汇总表.Cells[currentRow, 11].Value = 当前文件名; 
 
                             // 设置纸箱行的样式
@@ -1546,6 +1519,22 @@ namespace 包装计算
 
         }
 
+        private string 获取系统尺寸(int 盒数, dynamic 包装资料)
+        {
+            switch (盒数)
+            {
+                case 1:
+                    return 包装资料.单盒装选用_系统尺寸 ?? "";
+                case 2:
+                    return 包装资料.二盒装选用_系统尺寸 ?? "";
+                case 3:
+                    return 包装资料.三盒装选用_系统尺寸 ?? "";
+                case 5:
+                    return 包装资料.五盒装选用_系统尺寸 ?? "";
+                default:
+                    return "";
+            }
+        }
 
         // 添加辅助方法来获取最佳纸箱组合
         private List<(string 编号, int 数量, int 盒数)> 获取最佳纸箱组合(int 总盒数, 新包装资料 包装资料)
