@@ -30,6 +30,8 @@ namespace 包装计算
 
         public double 查找组合_基数 = 1900;  // 查找组合的基数
 
+        public static List<double> 线长列表 { get; set; } = new List<double>();
+
         public List<灯带尺寸> 灯带尺寸列表 = new List<灯带尺寸>   // 灯带尺寸列表
         {
             //灯带尺寸名称,横截面宽度,横截面高度，单位是CM
@@ -47,8 +49,19 @@ namespace 包装计算
             new 灯带尺寸("F2222",2.2,2.2)
         };
 
+        //// 添加新的静态字典
+        //private static Dictionary<string, List<(string 出线方式, double 销售数量)>> _需要附件处理的型号
+        //    = new Dictionary<string, List<(string, double)>>();
 
+        //// 提供公共访问器
+        //public static Dictionary<string, List<(string 出线方式, double 销售数量)>> 需要附件处理的型号
+        //{
+        //    get { return _需要附件处理的型号; }
+        //}
 
+        // 添加新的静态字典用于存储需要附件处理的型号信息
+        public static Dictionary<string, List<(string 出线方式, double 销售数量)>> 需要附件处理的型号
+            = new Dictionary<string, List<(string, double)>>();
 
     }
 
@@ -80,28 +93,25 @@ public class 数据项
     public string 内容A { get; set; }
     public string 内容O { get; set; }
     public double 内容R { get; set; }
+    public double 线长 { get; set; }   // 新增:线材长度
     public string 标志 { get; set; }
     public int 出现次数 { get; set; }  // 新增属性
 
-    // 原有的构造函数
-    public 数据项(string a, string o, double r, string id)
-    {
-        内容A = a;
-        内容O = o;
-        内容R = r;
-        标志 = id;
-        出现次数 = 1;  // 默认值
-    }
+    // 新增 "包装编码" 属性
+    public string 包装编码 { get; set; }
 
-    // 新增带出现次数的构造函数
-    public 数据项(string a, string o, double r, string id, int count)
+    // 修改构造函数，确保参数顺序和类型正确
+    public 数据项(string a, string o, double r, double 线长值, string id, int count = 1)
     {
         内容A = a;
         内容O = o;
         内容R = r;
+        线长 = 线长值;
         标志 = id;
         出现次数 = count;
     }
+
+
 }
 
 
@@ -112,7 +122,9 @@ public class 匹配信息
     public string 订单编号 { get; set; }
     public string 产品型号 { get; set; }
     public HashSet<string> 出线方式 { get; set; }
+
     public double 销售数量 { get; set; }
+    public double 线材长度 { get; set; } // 新增的属性
     public string 工作表名称 { get; set; }
     public double 工作表总米数 { get; set; }
     public Dictionary<string, string> A列序号字母映射 { get; set; } = new Dictionary<string, string>();  // 新增属性，用于存储A列序号与字母的映射
@@ -132,7 +144,7 @@ public class 匹配信息
         return null;
     }
 
-    public 匹配信息(string 订单编号, string 产品型号, HashSet<string> 出线方式, double 销售数量, string 工作表名称, double 工作表总米数)
+    public 匹配信息(string 订单编号, string 产品型号, HashSet<string> 出线方式, double 销售数量, string 工作表名称, double 工作表总米数, double 线材长度)
     {
         this.订单编号 = 订单编号;
         this.产品型号 = 产品型号;
@@ -140,6 +152,7 @@ public class 匹配信息
         this.销售数量 = 销售数量;
         this.工作表名称 = 工作表名称;
         this.工作表总米数 = 工作表总米数;
+        this.线材长度 = 线材长度;
     }
 
     // 新增方法：添加A列序号映射
@@ -159,7 +172,7 @@ public class 匹配信息
         }
     }
 
-
+    
     public override string ToString()
     {
         string 出线方式字符串 = 出线方式.Count > 0 ? string.Join("，", 出线方式) : "无";
