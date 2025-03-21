@@ -9,8 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="EPPlus" Version="7.2.2" />
-    <PackageReference Include="SunnyUI" Version="3.7.0" />
+    <PackageReference Include="EPPlus" Version="7.6.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="SunnyUI" Version="3.8.1" />
+    <PackageReference Include="System.Management" Version="9.0.2" />
   </ItemGroup>
 
 </Project>

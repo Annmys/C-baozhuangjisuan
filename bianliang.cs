@@ -9,9 +9,19 @@ namespace 包装计算
 {
     public class 变量
     {
+        public static Dictionary<string, (string 处理方式, int 重复次数)> 型号处理方式 = new Dictionary<string, (string, int)>();
+
+        public static bool 是否RU客户 = false;
         public string? 订单excel地址;
         public string? 附件excel地址;
         public string? 订单编号;
+        public string? 客户代码;
+        public string? 完成时间;
+        public string? 制单日期;
+        public string? 业务员;
+        public string? 标签;
+        public string? 包装要求;
+
 
         public List<string> 订单型号列表 = new List<string>();
         public Dictionary<string, List<string>> 附件表数据 = new Dictionary<string, List<string>>();
@@ -36,6 +46,7 @@ namespace 包装计算
         {
             //灯带尺寸名称,横截面宽度,横截面高度，单位是CM
             new 灯带尺寸("F10",0.9,1.8),
+            new 灯带尺寸("F11",1,1),
             new 灯带尺寸("F15",1.15,2.1),
             new 灯带尺寸("F16",1.55,0.6),
             new 灯带尺寸("F21",1.15,2.9),
@@ -46,7 +57,13 @@ namespace 包装计算
             new 灯带尺寸("F2010",2.0,1.0),
             new 灯带尺寸("F2012",2.0,1.2),
             new 灯带尺寸("F2219",2.2,1.9),
-            new 灯带尺寸("F2222",2.2,2.2)
+            new 灯带尺寸("F2222",2.2,2.2),
+            new 灯带尺寸("A1617",1.6,1.7),
+            new 灯带尺寸("F1617",1.6,1.7),
+            new 灯带尺寸("W3525",3.5,2.5),
+            new 灯带尺寸("D1624",1.6,2.4),
+            new 灯带尺寸("D2230",2.2,3.0),
+            new 灯带尺寸("F3013",3,1.3),
         };
 
         //// 添加新的静态字典

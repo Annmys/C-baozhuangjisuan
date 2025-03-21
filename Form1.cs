@@ -4,7 +4,11 @@ using System.Text;
 using OfficeOpenXml.Style;
 using System.Drawing;
 using System.Text.RegularExpressions;
-
+using System.Net.Http;
+using System.Text;
+using Newtonsoft.Json;
+using System.Threading.Tasks;
+using System.Management;
 
 namespace 包装计算
 {
@@ -12,12 +16,42 @@ namespace 包装计算
     {
         private 变量 变量 = new 变量();
 
+
+
         public Form1()
         {
             InitializeComponent();
 
             //读取excel文件必须增加声明才能运行正常
             ExcelPackage.LicenseContext = OfficeOpenXml.LicenseContext.NonCommercial;
+
+            // 软件启动加载包装数据
+            包装数据字典 = 加载包装数据();
+
+        }
+
+        private string 获取MAC地址()
+        {
+            try
+            {
+                ManagementObjectSearcher searcher = new ManagementObjectSearcher("SELECT MACAddress FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled = 'TRUE'");
+                ManagementObjectCollection information = searcher.Get();
+
+                foreach (ManagementObject obj in information)
+                {
+                    if (obj["MACAddress"] != null)
+                    {
+                        return obj["MACAddress"].ToString().Trim();
+                    }
+                }
+
+                return "未知";
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"获取MAC地址时出错: {ex.Message}");
+                return "未知";
+            }
         }
 
         //开始处理订单-------------------------------------------------------------------------------------
@@ -80,6 +114,11 @@ namespace 包装计算
                     int 销售数量列 = -1;
                     int F列 = -1;
                     int 剪切长度列 = -1;
+                    int 客户代码列 = -1;
+                    int 完工日期列 = -1;
+                    int 业务员列 = -1;
+                    int 标签列 = -1;
+                    int 包装要求列 = -1;
 
                     // 在第1行查找列标题
                     for (int col = 1; col <= worksheet.Dimension.End.Column; col++)
@@ -108,6 +147,21 @@ namespace 包装计算
                             case "剪切长度":  // 新增剪切长度列的判断
                                 剪切长度列 = col;
                                 break;
+                            case "客户代码":
+                                客户代码列 = col;
+                                break;
+                            case "表头要求完工日期":
+                                完工日期列 = col;
+                                break;
+                            case "客户业务员":
+                                业务员列 = col;
+                                break;
+                            case "标签":
+                                标签列 = col;
+                                break;
+                            case "包装要求":
+                                包装要求列 = col;
+                                break;
                         }
                     }
 
@@ -121,11 +175,26 @@ namespace 包装计算
                     变量.订单编号 = worksheet.Cells[2, 订单编号列].Text;
                     变量.订单出线字典[变量.订单编号] = new List<(string, HashSet<string>, string, double)>();
 
+                    变量.客户代码 = worksheet.Cells[2, 客户代码列].Text;
+                    变量.完成时间 = worksheet.Cells[2, 完工日期列].Text;
+                    变量.业务员 = worksheet.Cells[2, 业务员列].Text;
+                    变量.标签 = worksheet.Cells[2, 标签列].Text;
+                    变量.包装要求 = worksheet.Cells[2, 包装要求列].Text;
+                    //MessageBox.Show(变量.标签);
+                    //MessageBox.Show(变量.包装要求);
+
                     int startRow = -1;
                     string 当前型号 = "";
                     var 当前出线方式 = new HashSet<string>();
                     string 当前F列内容 = "";
                     double 当前销售数量 = 0;
+
+                    string 文件夹路径 = Path.Combine(Application.StartupPath, "输出结果", 变量.订单编号);
+                    // 如果文件夹已存在，先删除
+                    if (Directory.Exists(文件夹路径))
+                    {
+                        Directory.Delete(文件夹路径, true); // true表示递归删除所有内容
+                    }
 
                     // 从第2行开始处理数据
                     for (int row = 2; row <= worksheet.Dimension.End.Row; row++)
@@ -159,6 +228,10 @@ namespace 包装计算
 
                     // 输出订单信息
                     输出订单信息(变量.订单编号, 变量.订单出线字典[变量.订单编号]);
+
+
+
+
                 }
             }
             catch (Exception ex)
@@ -167,305 +240,7 @@ namespace 包装计算
             }
         }
 
-        private void ProcessSection(ExcelWorksheet worksheet, int startRow, int endRow, int 规格型号列, int F列, int 销售数量列,int 剪切长度列,
-    ref string 当前型号, ref HashSet<string> 当前出线方式, ref string 当前F列内容, ref double 当前销售数量)
-        {
-            // 获取主行信息
-            var mainSpecCell = worksheet.Cells[startRow, 规格型号列];
-            var mainMaterialCell = worksheet.Cells[startRow, F列];
-            var mainSalesCell = worksheet.Cells[startRow, 销售数量列];
 
-            // 动态获取备注列
-            int 备注列 = 获取备注列索引(worksheet);
-            List<double> 区间线长列表 = new List<double>();
-
-            string 规格型号 = mainSpecCell.Text;
-            当前F列内容 = mainMaterialCell.Text;
-            double.TryParse(mainSalesCell.Text, out 当前销售数量);
-
-            // 从规格型号中提取基础型号
-            if (规格型号.Contains("C-SFR-") || 规格型号.Contains("C-FR-"))
-            {
-                var parts = 规格型号.Split(new[] { "C-SFR-", "C-FR-" }, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length >= 1)
-                {
-                    string 型号部分 = parts[0];
-                    var match = System.Text.RegularExpressions.Regex.Match(型号部分, @"F\d+");
-                    if (match.Success)
-                    {
-                        当前型号 = match.Value;
-                    }
-                }
-            }
-
-            // 确定弯型
-            var 需要判断弯型的型号 = new List<string> { "F22", "F23", "F2222", "F2219" };
-            string 弯型前缀 = "";
-            if (规格型号.Contains("【正弯】"))
-            {
-                弯型前缀 = "正弯";
-            }
-            else if (规格型号.Contains("【侧弯】"))
-            {
-                弯型前缀 = "侧弯";
-            }
-
-            // 清空并初始化基础出线方式集合
-            var 基础出线方式 = new HashSet<string>();
-            List<double> 线长列表 = new List<double>(); // 使用 double 类型来存储线长数值
-
-            // 处理该区间内的所有行以获取出线方式
-            for (int row = startRow; row <= endRow; row++)
-            {
-                var specCell = worksheet.Cells[row, 规格型号列];
-                if (specCell.Value == null) continue;
-
-                string 当前行规格型号 = specCell.Text;
-
-                // 检查是否包含配件行标识
-                if (当前行规格型号.Contains("B-硅胶注塑式") || 当前行规格型号.Contains("B-双层注塑式") || 当前行规格型号.Contains("B-硅胶双层注塑式") || 当前行规格型号.Contains("B-注塑式"))
-                {
-                    // 检查常见的出线方式关键词
-                    if (当前行规格型号.Contains("端部出线"))
-                    {
-                        基础出线方式.Add("端部出线");
-                    }
-                    if (当前行规格型号.Contains("侧部出线"))
-                    {
-                        基础出线方式.Add("侧部出线");
-                    }
-                    if (当前行规格型号.Contains("底部出线"))
-                    {
-                        基础出线方式.Add("底部出线");
-                    }
-
-                    //获取无附件的线长长度
-                    // 动态获取备注列的值
-                    var remarkCell = worksheet.Cells[row, 备注列];
-                    string 当前行备注 = remarkCell?.Text ?? "";
-                    // 获取原始线长，可能有一个或两个
-                    List<double> 原始线长列表 = 提取线长列表(当前行规格型号);
-                    // 将多个线长相加
-                    double 最终线长 = 原始线长列表.Sum(); // 将所有提取到的线长求和
-                    // 检查备注列，如果有 "线长X米" 的内容，替换原始线长
-                    double 备注线长 = 从备注中获取线长(当前行备注);
-                    if (备注线长 > 0)
-                    {
-                        最终线长 = 备注线长;
-                    }
-                    
-                    区间线长列表.Add(最终线长);
-
-                }
-            }
-
-            // 计算区间的总线长
-            double 区间总线长 = 区间线长列表.Sum();
-            //MessageBox.Show($"最终线长：{区间总线长}", "错误");
-
-            // 最后添加弯型前缀（如果有）
-            当前出线方式.Clear();
-            bool 是特殊型号 = false;
-            foreach (var 特殊型号 in 需要判断弯型的型号)
-            {
-                if (当前型号.StartsWith(特殊型号))
-                {
-                    是特殊型号 = true;
-                    break;
-                }
-            }
-
-            foreach (var 出线方式 in 基础出线方式)
-            {
-                //当前出线方式.Add(string.IsNullOrEmpty(弯型前缀) ? 出线方式 : $"{弯型前缀}{出线方式}");
-                // 只有特殊型号且有弯型前缀时才添加前缀
-                if (是特殊型号 && !string.IsNullOrEmpty(弯型前缀))
-                {
-                    当前出线方式.Add($"{弯型前缀}{出线方式}");
-                }
-                else
-                {
-                    当前出线方式.Add(出线方式);
-                }
-            }
-
-            // 在处理订单数据之前，先创建一个字典来存储所有型号的数据
-            Dictionary<string, List<(double 长度, int 数量, string 来源)>> 订单汇总数据 = new Dictionary<string, List<(double, int, string)>>();
-
-            // 检查剪切长度
-            if (剪切长度列 != -1)
-            {
-                string 剪切长度 = worksheet.Cells[startRow, 剪切长度列].Text?.Trim() ?? "";
-                string 销售数量文本 = worksheet.Cells[startRow, 销售数量列].Text;
-                double 当前行销售数量 = 0;
-                double.TryParse(销售数量文本, out 当前行销售数量);
-
-                // 确保型号在字典中存在
-                if (!订单汇总数据.ContainsKey(当前型号))
-                {
-                    订单汇总数据[当前型号] = new List<(double, int, string)>();
-                }
-
-                // 处理剪切长度信息
-                if (!string.IsNullOrEmpty(剪切长度))
-                {
-                    if (剪切长度.Contains("见附件"))
-                    {
-                        // 记录需要附件处理的型号信息
-                        if (!变量.需要附件处理的型号.ContainsKey(当前型号))
-                        {
-                            变量.需要附件处理的型号[当前型号] = new List<(string 出线方式, double 销售数量)>();
-                        }
-                        // 使用当前出线方式而不是F列内容
-                        变量.需要附件处理的型号[当前型号].Add((string.Join(",", 当前出线方式), 当前行销售数量));
-
-                        // 创建匹配信息
-                        var 匹配信息 = new 匹配信息(
-                            变量.订单编号,
-                            当前型号,
-                            当前出线方式,
-                            当前行销售数量,
-                            "",
-                            当前行销售数量,
-                            0
-                        );
-                        变量.订单附件匹配列表.Add(匹配信息);
-
-                        //// Debug输出
-                        //MessageBox.Show($"添加匹配信息:\n" +
-                        //               $"订单编号: {变量.订单编号}\n" +
-                        //               $"型号: {当前型号}\n" +
-                        //               $"出线方式: {string.Join(",", 当前出线方式)}\n" +
-                        //               $"销售数量: {当前行销售数量}\n" +
-                        //               $"当前匹配列表数量: {变量.订单附件匹配列表.Count}",
-                        //               "匹配信息记录");
-                    }
-                    else
-                    {
-                        // 处理直接包含长度信息的情况
-                        string[] 长度组 = 剪切长度.Split(new[] { ',', '，', ';', '；', '+' }, StringSplitOptions.RemoveEmptyEntries);
-                        foreach (string 单个长度 in 长度组)
-                        {
-                            var match = Regex.Match(单个长度.Trim(),
-                                @"(\d+(?:\.\d+)?)\s*[Mm][^*]*\*\s*(\d+)\s*(?:PC|PCS|pc|pcs)",
-                                RegexOptions.IgnoreCase);
-
-                            if (match.Success)
-                            {
-                                double 长度 = double.Parse(match.Groups[1].Value);
-                                int 数量 = int.Parse(match.Groups[2].Value);
-                                订单汇总数据[当前型号].Add((长度, 数量, "直接长度"));
-                            }
-                        }
-                    }
-                }
-                else if (当前行销售数量 > 0)
-                {
-                    // 处理只有销售数量的情况
-                    订单汇总数据[当前型号].Add((当前行销售数量, 1, "销售数量"));
-                }
-            }
-
-            // 在处理完所有数据后，统一生成Excel数据
-            foreach (var 型号数据 in 订单汇总数据)
-            {
-                string 基础型号 = 型号数据.Key;
-                var 数据列表 = 型号数据.Value;
-
-                // 首先检查是否是需要附件处理的型号
-                if (变量.需要附件处理的型号.ContainsKey(基础型号))
-                {
-                    //MessageBox.Show($"型号 {基础型号} 需要附件处理，跳过Excel生成", "提示");
-                    continue; // 跳过需要附件处理的型号
-                }
-
-                // 检查是否已存在该型号的数据，如果存在则添加后缀
-                string 当前处理型号 = 基础型号;
-                int 后缀序号 = 1;
-                while (变量.附件表数据.ContainsKey(当前处理型号))
-                {
-                    当前处理型号 = $"{基础型号}_{后缀序号++}";
-                }
-
-                // 使用新的型号标识创建数据列表
-                变量.附件表数据[当前处理型号] = new List<string>();
-
-                int 序号 = 1;
-                double 总米数 = 0;
-                bool 需要附件处理 = false;
-
-                foreach (var (长度, 数量, 来源) in 数据列表)
-                {
-                    if (来源 == "附件")
-                    {
-                        // 标记需要等待附件处理
-                        需要附件处理 = true;
-                        总米数 = 长度; // 保存销售数量，供后续附件处理使用
-
-                        // 添加匹配信息
-                        var 匹配信息 = new 匹配信息(
-                            变量.订单编号,
-                            基础型号,
-                            当前出线方式,
-                            总米数,
-                            当前处理型号,
-                            总米数,
-                            区间总线长);
-                        变量.订单附件匹配列表.Add(匹配信息);
-
-                        // Debug输出
-                        MessageBox.Show($"型号 {当前处理型号} 需要从附件获取数据\n" +
-                                      $"销售数量: {总米数}",
-                                      "附件处理标记");
-
-                        break; // 跳出循环，等待附件处理
-                    }
-                    else
-                    {
-                        // 处理直接长度和销售数量的情况
-                        for (int i = 0; i < 数量; i++)
-                        {
-                            string 记录 = $"{序号++}, 1, {长度}, , , , , ";
-                            变量.附件表数据[当前处理型号].Add(记录);
-                            总米数 += 长度;
-                        }
-                    }
-                }
-
-                // 只处理非附件数据的总计和匹配信息
-                if (!需要附件处理 && 总米数 > 0)
-                {
-                    变量.附件表数据[当前处理型号].Add($"总计, , {总米数:F3}, , , ");
-
-                    var 匹配信息 = new 匹配信息(
-                        变量.订单编号,
-                        基础型号,
-                        当前出线方式,
-                        总米数,
-                        当前处理型号,
-                        总米数,
-                        区间总线长);
-                    变量.订单附件匹配列表.Add(匹配信息);
-                }
-            }
-
-            // 如果没有剪切长度信息，使用销售数量
-            if (当前销售数量 == 0 && double.TryParse(worksheet.Cells[startRow, 销售数量列].Text, out double 销售数量值))
-            {
-                当前销售数量 = 销售数量值;
-            }
-
-            // Debug输出
-            //string debugInfo = $"处理区间：{startRow}-{endRow}\n" +
-            //                  $"型号：{当前型号}\n" +
-            //                  $"规格型号：{规格型号}\n" +
-            //                  $"F列内容：{当前F列内容}\n" +
-            //                  $"出线方式：{string.Join("，", 当前出线方式)}\n" +
-            //                  $"销售数量：{当前销售数量}\n" +
-            //                  $"区间总线长：{区间总线长}";
-
-            //MessageBox.Show(debugInfo);
-        }
 
         /// <summary>
         /// 获取备注列的索引，通过查询第一行，找到包含"备注"的列
@@ -530,18 +305,27 @@ namespace 包装计算
             return 0;
         }
 
-        private void 输出订单信息(string 订单编号, List<(string 型号, HashSet<string> 出线方式, string F列内容, double 销售数量)> 型号出线方式列表)
+        private void 输出订单信息(string 订单编号, List<(string 型号, HashSet<string> 出线方式, string 物料编码, double 销售数量)> 型号出线方式列表)
         {
+
             uiTextBox_状态.AppendText($"订单编号: {订单编号}" + Environment.NewLine);
-            foreach (var (型号, 出线方式, F列内容, 销售数量) in 型号出线方式列表)
+            foreach (var (型号, 出线方式, 物料编码, 销售数量) in 型号出线方式列表)
             {
                 string 出线方式字符串 = 出线方式.Count > 0 ? string.Join("，", 出线方式) : "无";
                 uiTextBox_状态.AppendText($"型号: {型号}" + Environment.NewLine);
                 uiTextBox_状态.AppendText($"出线方式: {出线方式字符串}" + Environment.NewLine);
-                uiTextBox_状态.AppendText($"F列内容: {F列内容}" + Environment.NewLine);
+                uiTextBox_状态.AppendText($"物料编码: {物料编码}" + Environment.NewLine);
                 uiTextBox_状态.AppendText($"销售数量: {销售数量}" + Environment.NewLine);
                 uiTextBox_状态.AppendText(Environment.NewLine);
+
+
             }
+
+
+
+
+
+
         }
 
         private void uiButton1_Click(object sender, EventArgs e)
@@ -640,7 +424,7 @@ namespace 包装计算
 
                         // 存储序号前缀到匹配信息中
                         var 匹配信息 = 变量.订单附件匹配列表.FirstOrDefault(x => x.工作表名称 == 工作表名称);
-                        if (匹配信息 != null )  // 添加检查，确保不是附件型号
+                        if (匹配信息 != null)  // 添加检查，确保不是附件型号
                         {
                             // 检查是否是需要附件处理的型号
                             if (变量.需要附件处理的型号.ContainsKey(匹配信息.产品型号))
@@ -739,7 +523,7 @@ namespace 包装计算
 
         private void EXCEL附件数据_转列表()
         {
-            
+
             try
             {
                 using (ExcelPackage package = new ExcelPackage(new FileInfo(变量.附件excel地址)))
@@ -754,30 +538,13 @@ namespace 包装计算
 
                         string 工作表名称 = worksheet.Name;
 
-                        // 添加调试信息
-                        //MessageBox.Show($"处理工作表:\n" +
-                        //              $"名称: {工作表名称}\n" +
-                        //              $"行数: {worksheet.Dimension.End.Row}\n" +
-                        //              $"列数: {worksheet.Dimension.End.Column}",
-                        //              "工作表信息");
-
-                        //MessageBox.Show(工作表名称, "线长列号识别");
-
-                        // 查找对应的匹配信息
-                        //var 当前匹配信息 = 变量.订单附件匹配列表.FirstOrDefault(x => x.工作表名称 == worksheet.Name);
-                        //if (当前匹配信息 == null)
-                        //{
-                        //    continue; // 如果找不到匹配信息，跳过此工作表
-                        //}
-
-
 
                         //MessageBox.Show(工作表名称, "线长列号识别");
 
                         if (!变量.附件表数据.ContainsKey(worksheet.Name))
                         {
                             变量.附件表数据[worksheet.Name] = new List<string>();
-                            
+
                         }
 
                         // 查找包含"序号"的行（扩大搜索范围）
@@ -791,6 +558,8 @@ namespace 包装计算
                         int 实际剪切长度毫米列号 = -1;
                         int 实际剪切长度米列号 = -1;
                         int 线长列号 = -1;  // 新增线长列号变量
+                        int 一端线长列号 = -1;
+                        int 二端线长列号 = -1;
                         int 总线长列号 = -1;
 
                         // 扩大搜索范围到前20行，但不超过工作表的实际行数
@@ -845,11 +614,11 @@ namespace 包装计算
                             {
                                 实际剪切长度毫米列号 = col;
                             }
-                            if (cellValue.Contains("实际剪切长度(米)") )
+                            if (cellValue.Contains("实际剪切长度(米)"))
                             {
                                 实际剪切长度米列号 = col;
                             }
-                            if (cellValue.Contains("线长"))  
+                            if (cellValue.Contains("线长"))
                             {
                                 // 检查下一行是否包含米数
                                 var nextRowValue = worksheet.Cells[序号行号 + 1, col].Text?.Trim() ?? "";
@@ -861,23 +630,26 @@ namespace 包装计算
                                 }
 
                             }
+                            if (Regex.IsMatch(cellValue, @"01.*端.*线.*长"))
+                            {
+                                一端线长列号 = col;
+                                MessageBox.Show($"正则匹配到一端线长列：\n列号 = {col}\n内容 = '{cellValue}'", "一端线长列号识别");
+                            }
+
+                            if (cellValue.Contains("02") && cellValue.Contains("端") && cellValue.Contains("线") && cellValue.Contains("长"))
+                            {
+                                二端线长列号 = col;
+                                MessageBox.Show($"找到二端线长列：\n列号 = {col}\n内容 = '{cellValue}'", "二端线长列号识别");
+                            }
                             if (cellValue.Contains("总线长"))
                             {
                                 总线长列号 = col;
                                 //MessageBox.Show($"总线长列号：\n列标题 = {cellValue}\n总线长列号 = {总线长列号}", "总线长列号识别");
                             }
 
+                            //MessageBox.Show($"一端线长列号：\n列标题 = {cellValue}\n一端线长列号 = {一端线长列号}", "一端线长列号识别");
+
                         }
-
-                        
-
-                        // 验证必要的列是否都找到
-                        //if (序号列号 == -1 || 条数列号 == -1 || 总长度列号 == -1)
-                        //{
-                        //    MessageBox.Show($"工作表 {worksheet.Name} 中未找到必要的列标题", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        //    continue;
-                        //}
-                        
 
 
                         // 处理数据（从标题行的下一行开始，确保不超出工作表范围）
@@ -886,6 +658,7 @@ namespace 包装计算
                             try
                             {
                                 var cell序号 = worksheet.Cells[row, 序号列号];
+                                var 空白位 = worksheet.Cells[row, 3];
                                 var cell条数 = worksheet.Cells[row, 条数列号];
                                 var cell总米数 = worksheet.Cells[row, 总长度列号];
 
@@ -927,7 +700,25 @@ namespace 包装计算
                                     double.TryParse(线长数字, out 线长);
                                 }
 
-                                //MessageBox.Show($"行 {row} 的线长: {线长}", "线长信息");
+                                string 一端线长值 = 一端线长列号 != -1 ? worksheet.Cells[row, 一端线长列号].Text?.Trim() ?? "" : "";
+                                double 一端线长 = 0.0;
+                                if (!string.IsNullOrEmpty(一端线长值))
+                                {
+                                    string 一端线长数字 = 一端线长值.ToLower().Replace("m", "").Trim();
+                                    double.TryParse(一端线长数字, out 一端线长);
+                                }
+
+                                string 二端线长值 = 二端线长列号 != -1 ? worksheet.Cells[row, 二端线长列号].Text?.Trim() ?? "" : "";
+                                double 二端线长 = 0.0;
+                                if (!string.IsNullOrEmpty(二端线长值))
+                                {
+                                    string 二端线长数字 = 二端线长值.ToLower().Replace("m", "").Trim();
+                                    double.TryParse(二端线长数字, out 二端线长);
+                                }
+
+                                double 合并线长 = 一端线长 + 二端线长;
+
+                                //MessageBox.Show($"行 {row} 的线长: {一端线长}", "线长信息");
 
                                 // 如果02端线长为0，尝试从总线长获取
                                 if (线长 == 0 && 总线长列号 != -1)
@@ -983,23 +774,30 @@ namespace 包装计算
                                         线长 = 1.0; // 如果实在获取不到，才使用默认值
                                     }
                                 }
-                                
+
+                                string 实际值 = cell总米数.Text?.Trim() ?? "0";
                                 
 
-                                if (cell序号.Value != null && cell条数.Value != null && cell总米数.Value != null)
+                                //MessageBox.Show($"总长度 {cell总米数.Value.ToString()}", "");
+                                if (空白位.Value != null && cell条数.Value != null && cell总米数.Value != null)
                                 {
-                                    if (cell序号.Value is ExcelErrorValue || cell条数.Value is ExcelErrorValue || cell总米数.Value is ExcelErrorValue)
+                                    if (空白位.Value is ExcelErrorValue || cell条数.Value is ExcelErrorValue || cell总米数.Value is ExcelErrorValue)
                                     {
                                         continue;
                                     }
 
-                                    string 序号 = cell序号.Value.ToString();
+                                    string 序号 = cell序号.Value?.ToString() ?? "";
+                                    //string 序号 = cell序号.Value.ToString();
                                     int 条数;
                                     double 总米数;
 
                                     if (int.TryParse(cell条数.Value.ToString(), out 条数) &&
-                                        double.TryParse(cell总米数.Value.ToString(), out 总米数))
+                                        double.TryParse(cell总米数.Text?.Trim() ?? "0", out 总米数))
                                     {
+                                        //if (double.TryParse(cell总米数.Text?.Trim() ?? "0", out double 解析米数))
+                                        //{
+                                        //    总米数 = 解析米数;
+                                        //}
 
                                         if (条数 > 1)
                                         {
@@ -1035,8 +833,13 @@ namespace 包装计算
                             foreach (string 记录 in 变量.附件表数据[worksheet.Name])
                             {
                                 string[] 数据项 = 记录.Split(',');
-                                if (数据项.Length >= 3 && double.TryParse(数据项[2].Trim(), out double 总米数))
+                                // 检查序号不是空的，且不包含 "Grand Total"
+                                if (数据项.Length >= 3 &&
+                                    !string.IsNullOrEmpty(数据项[0].Trim()) &&
+                                    !数据项[0].Contains("Grand Total") &&
+                                    double.TryParse(数据项[2].Trim(), out double 总米数))
                                 {
+                                    //MessageBox.Show($"长度 {数据项[2].Trim()}", "");
                                     总米数和 += 总米数;
                                 }
                             }
@@ -1053,6 +856,69 @@ namespace 包装计算
                             // 添加总计记录
                             变量.附件表数据[worksheet.Name].Add($"总计, , {总米数和:F3}, , , ");
                             //MessageBox.Show($"工作表 {worksheet.Name} 的总米数和: {总米数和:F3}");
+
+                            // 如果订单已导入，进行数量比对
+                            //if (!string.IsNullOrEmpty(uiTextBox_订单地址.Text) && 变量.订单出线字典 != null && 变量.订单出线字典.Any())
+                            //{
+                            //    foreach (var 订单 in 变量.订单出线字典)
+                            //    {
+                            //        foreach (var (型号, 出线方式, F列内容, 销售数量) in 订单.Value)
+                            //        {
+                            //            // 将销售数量四舍五入到三位小数进行比较
+                            //            double 订单数量 = Math.Round(销售数量, 3);
+                            //            if (Math.Abs(订单数量 - 总米数和) < 0.001) // 使用小于0.001的差值来判断相等
+                            //            {
+                            //                // 查找所有匹配的订单附件信息
+                            //                var 匹配信息列表 = 变量.订单附件匹配列表
+                            //                    .Where(x => x.产品型号 == 型号 && Math.Abs(x.销售数量 - 订单数量) < 0.001)
+                            //                    .ToList();
+
+                            //                // 根据匹配数量进行不同处理
+                            //                if (匹配信息列表.Count > 0)
+                            //                {
+                            //                    // 如果有多个匹配，需要分别处理
+                            //                    if (匹配信息列表.Count > 1)
+                            //                    {
+                            //                        // 获取所有匹配的工作表名称
+                            //                        var 工作表名称列表 = 匹配信息列表.Select(x => x.工作表名称).Distinct().ToList();
+
+                            //                        // 确保有足够的文件来处理多个匹配
+                            //                        string 文件夹路径 = Path.Combine(Application.StartupPath, "输出结果", 变量.订单编号);
+                            //                        string 处理好订单文件夹路径 = Path.Combine(文件夹路径, "订单资料");
+
+                            //                        // 查找所有匹配的文件（包括带数字后缀的）
+                            //                        var 匹配文件列表 = Directory.GetFiles(处理好订单文件夹路径, $"{型号}-{销售数量}-附件*.xlsx")
+                            //                            .OrderBy(f => f)
+                            //                            .ToList();
+
+                            //                        if (匹配文件列表.Count >= 工作表名称列表.Count)
+                            //                        {
+                            //                            // 为每个匹配的工作表更新对应的文件
+                            //                            for (int i = 0; i < 工作表名称列表.Count; i++)
+                            //                            {
+                            //                                if (i < 匹配文件列表.Count)
+                            //                                {
+                            //                                    MessageBox.Show("多个型号的同样销售数量！！！");
+                            //                                }
+                            //                            }
+                            //                        }
+                            //                        else
+                            //                        {
+                            //                            MessageBox.Show($"警告：文件数量不足，需要{工作表名称列表.Count}个文件，但只找到{匹配文件列表.Count}个文件", "文件数量不足");
+                            //                        }
+                            //                    }
+                            //                    else
+                            //                    {
+                            //                        // 只有一个匹配，正常处理
+                            //                        var 匹配信息 = 匹配信息列表.First();
+                            //                        匹配信息.工作表名称 = worksheet.Name;  // 更新为实际的工作表名称
+                            //                        更新订单_附件型号Excel文件添加附件数据(型号, 销售数量, worksheet.Name);
+                            //                    }
+                            //                }
+                            //            }
+                            //        }
+                            //    }
+                            //}
 
                             // 如果订单已导入，进行数量比对
                             if (!string.IsNullOrEmpty(uiTextBox_订单地址.Text) && 变量.订单出线字典 != null && 变量.订单出线字典.Any())
@@ -1073,37 +939,10 @@ namespace 包装计算
                                             if (匹配信息 != null)
                                             {
                                                 匹配信息.工作表名称 = worksheet.Name;  // 更新为实际的工作表名称
+                                                //MessageBox.Show(worksheet.Name);
+                                                // 更新已存在的Excel文件，添加附件数据
+                                                更新订单_附件型号Excel文件添加附件数据(型号, 销售数量, worksheet.Name);
 
-                                                
-                                                // 从当前工作表获取所有数据的线长 2025.1.22 废弃
-                                                //if (变量.附件表数据[worksheet.Name].Count > 0)
-                                                //{
-                                                //    变量.线长列表.Clear();  // 清空之前的数据
-
-                                                //    foreach (var 行数据 in 变量.附件表数据[worksheet.Name])
-                                                //    {
-                                                //        string[] 数据项 = 行数据.Split(',');
-                                                //        if (数据项.Length >= 9)
-                                                //        {
-                                                //            // 获取条数和线长
-                                                //            int 条数 = int.Parse(数据项[1].Trim());
-                                                //            if (double.TryParse(数据项[8].Trim(), out double 附件线长))
-                                                //            {
-                                                //                // 根据条数添加对应数量的线长
-                                                //                for (int i = 0; i < 条数; i++)
-                                                //                {
-                                                //                    变量.线长列表.Add(附件线长);
-                                                //                }
-                                                //                //有问题，只能获取到最后一个线长
-                                                //                //匹配信息.线材长度 = 附件线长;
-                                                //            }
-                                                //        }
-                                                //    }
-
-                                                //    // 添加调试信息
-                                                //    //MessageBox.Show($"线长列表数量: {变量.线长列表.Count}\n" +
-                                                //    //               $"线长值: {string.Join(", ", 变量.线长列表)}");
-                                                //}
                                             }
 
                                             // 在这里添加调试信息
@@ -1156,6 +995,11 @@ namespace 包装计算
 
         private void button_开始处理_Click(object sender, EventArgs e)
         {
+            
+            //if (uiCheckBox_RU客户.Checked)
+            //{
+            //    MessageBox.Show("RU客户");
+            //}
             if (变量.订单附件匹配列表.Count == 0)
             {
                 MessageBox.Show("没有找到匹配的订单和附件信息", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -1168,6 +1012,7 @@ namespace 包装计算
             {
                 string 型号SHEET = 匹配信息.工作表名称;
                 string 产品型号 = 匹配信息.产品型号;
+
 
                 // 查找对应型号的灯带尺寸
                 var 灯带尺寸 = 变量.灯带尺寸列表.FirstOrDefault(x => x.型号 == 产品型号.Replace("B", ""));
@@ -1227,7 +1072,7 @@ namespace 包装计算
 
                 if (候选包装列表.Any())
                 {
-                    
+
                     string 使用的表名;
                     // 检查是否有组合结果，确保至少有一个工作表
                     var 当前工作表匹配 = 变量.订单附件匹配列表.FirstOrDefault(x =>
@@ -1259,7 +1104,7 @@ namespace 包装计算
                     // 验证使用的表名是否存在于附件表数据中
                     if (!变量.附件表数据.ContainsKey(使用的表名))
                     {
-                        MessageBox.Show($"错误：找不到表名 {使用的表名} 的数据！\n" +
+                        MessageBox.Show($"错误：找不到1表名 {使用的表名} 的数据！\n" +
                                        $"可用的表名：{string.Join(", ", 变量.附件表数据.Keys)}",
                                        "错误",
                                        MessageBoxButtons.OK,
@@ -1271,10 +1116,39 @@ namespace 包装计算
 
                     //MessageBox.Show(数据条数.ToString(), "数据条数", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     // 选择最佳包装   测试V0.9
+                    //var 包装资料 = 包装查询.选择最佳包装(候选包装列表, 数据条数);
 
-                    var 包装资料 = 包装查询.选择最佳包装(候选包装列表, 数据条数);
-                    
-                    
+                    string 灯带型号 = 获取灯带型号(); // 从订单数据中获取灯带型号
+                    string 出线方式 = 获取出线方式(); // 从订单数据中获取出线方式
+
+
+                    var 包装资料 = 包装查询.选择最佳包装(候选包装列表, 灯带型号, 出线方式, 数据条数);
+
+                    // 方案2：启动新的任务进行AI分析
+                    //if (包装资料 != null)
+                    //{
+                    //    //MessageBox.Show($"开始AI分析", "AI分析", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    //    Task.Run(async () =>
+                    //    {
+                    //        try
+                    //        {
+                    //            var AI建议 = await 获取AI包装建议(灯带型号, 出线方式, 数据条数, 包装资料);
+                    //            // 使用 Invoke 在UI线程上显示消息框
+                    //            this.Invoke((MethodInvoker)delegate
+                    //            {
+                    //                MessageBox.Show($"AI包装方案分析：\n\n{AI建议}", "AI分析结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    //            });
+                    //        }
+                    //        catch (Exception ex)
+                    //        {
+                    //            this.Invoke((MethodInvoker)delegate
+                    //            {
+                    //                MessageBox.Show($"AI分析发生错误：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    //            });
+                    //        }
+                    //    });
+                    //}
+
                     //MessageBox.Show(包装资料.半成品BOM物料码, "数据条数", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                     // 保存完整的包装资料到匹配信息中
@@ -1352,6 +1226,34 @@ namespace 包装计算
             }
         }
 
+        private string 获取灯带型号()
+        {
+            // 从订单数据中获取灯带型号
+            if (变量.订单出线字典 != null && 变量.订单出线字典.ContainsKey(变量.订单编号))
+            {
+                var 订单信息 = 变量.订单出线字典[变量.订单编号];
+                if (订单信息.Any())
+                {
+                    return 订单信息.First().型号; // 返回第一个订单的灯带型号
+                }
+            }
+            return string.Empty; // 如果未找到，返回空字符串
+        }
+
+        private string 获取出线方式()
+        {
+            // 从订单数据中获取出线方式
+            if (变量.订单出线字典 != null && 变量.订单出线字典.ContainsKey(变量.订单编号))
+            {
+                var 订单信息 = 变量.订单出线字典[变量.订单编号];
+                if (订单信息.Any())
+                {
+                    return 订单信息.First().出线方式.FirstOrDefault() ?? string.Empty; // 返回第一个订单的第一个出线方式
+                }
+            }
+            return string.Empty; // 如果未找到，返回空字符串
+        }
+
 
         private void 开始组合(string 型号SHEET, string 产品型号, string 订单编号)
         {
@@ -1384,7 +1286,7 @@ namespace 包装计算
                 return;
             }
 
-            
+
 
             if (变量.附件表数据.ContainsKey(型号SHEET))
             {
@@ -1431,7 +1333,7 @@ namespace 包装计算
                         }
 
                     }
-                    
+
                 }
 
                 // 在调用Calculate带线长Combinations之前
@@ -1443,23 +1345,43 @@ namespace 包装计算
                 //    "输入数据");
 
                 Solution带线长 s = new Solution带线长();
-                var 组合结果 = s.Calculate带线长Combinations(
+
+                if (变量.是否RU客户)
+                {
+                    var 组合结果 = s.CalculateRU客户(
                     灯带长度列表,
                     线长列表,
                     产品型号,
                     变量.查找组合_基数,
                     包装资料,
                     变量.灯带尺寸列表  // 传入灯带尺寸列表
-                );
+                    );
+                    // 保存结果
+                    保存组合结果到Excel(组合结果, 数据项列表, 订单编号, 型号SHEET, 灯带尺寸);
+                }
+                else
+                {
+                    var 组合结果1 = s.Calculate带线长Combinations(
+                    灯带长度列表,
+                    线长列表,
+                    产品型号,
+                    变量.查找组合_基数,
+                    包装资料,
+                    变量.灯带尺寸列表  // 传入灯带尺寸列表
+                    );
+                    // 保存结果
+                    保存组合结果到Excel(组合结果1, 数据项列表, 订单编号, 型号SHEET, 灯带尺寸);
+                }
 
-                // 保存结果
-                保存组合结果到Excel(组合结果, 数据项列表, 订单编号, 型号SHEET, 灯带尺寸);
+
+
+
 
 
             }
         }
 
-        
+
 
 
 
@@ -1468,7 +1390,7 @@ namespace 包装计算
             // 在方法开始处添加
             Dictionary<string, int> 序号使用计数 = new Dictionary<string, int>();
 
-            string 文件夹路径 = Path.Combine(Application.StartupPath,"输出结果", 订单编号);
+            string 文件夹路径 = Path.Combine(Application.StartupPath, "输出结果", 订单编号);
 
             if (!Directory.Exists(文件夹路径))
             {
@@ -1523,7 +1445,7 @@ namespace 包装计算
                     }
 
                     ExcelWorksheet worksheet = excelPackage.Workbook.Worksheets.Add(工作表名);
-                    
+
 
                     //12.24原来可以用的部分
                     //var combination = 组合结果[i];
@@ -1694,7 +1616,7 @@ namespace 包装计算
 
                 }
 
-                //2025.1.22问题点：无附件订单保存正常，有附件订单保存报错。
+                //2025.1.22问题点：无附件订单保存正常，有附件订单保存报错。已经解决
                 excelPackage.Save();
 
 
@@ -1758,7 +1680,7 @@ namespace 包装计算
             {
                 包装资料 = (新包装资料)匹配信息.选中包装资料;
                 BOM物料码 = 包装资料.半成品BOM物料码;
-                
+
                 uiTextBox_状态.AppendText($"使用已选择的包装 - BOM物料码: {BOM物料码}" + Environment.NewLine);
 
                 // 添加更多包装信息的输出，方便调试
@@ -1774,10 +1696,10 @@ namespace 包装计算
 
 
             // 创建或更新汇总Excel
-            string 汇总文件路径 = Path.Combine(Application.StartupPath,"输出结果", 订单编号, "包装材料需求流转单.xlsx");
+            string 汇总文件路径 = Path.Combine(Application.StartupPath, "输出结果", 订单编号, "包装材料需求流转单.xlsx");
             FileInfo 汇总文件信息 = new FileInfo(汇总文件路径);
 
-            
+
 
             // 创建一个字典来统计每个BOM物料码的使用数量
             Dictionary<string, int> BOM物料码统计 = new Dictionary<string, int>();
@@ -1790,6 +1712,7 @@ namespace 包装计算
                 }
                 BOM物料码统计[key] += 组合结果.Count;
             }
+
 
             using (ExcelPackage 汇总包 = new ExcelPackage(汇总文件信息))
             {
@@ -1844,6 +1767,20 @@ namespace 包装计算
                         }
                     }
 
+
+                    // 删除匹配的配件说明书行
+                    for (int row = 7; row <= lastRow; row++)
+                    {
+                        string 物料类型 = 汇总表.Cells[row, 2].Text;
+
+                        if (物料类型 == "配件说明书")
+                        {
+                            汇总表.DeleteRow(row);
+                            row--; // 调整行索引
+                            lastRow--; // 调整总行数
+                        }
+                    }
+
                     // 再删除匹配的半成品BOM行
                     for (int row = 7; row <= lastRow; row++)
                     {
@@ -1874,18 +1811,30 @@ namespace 包装计算
                     // 第3行设置
                     汇总表.Cells["A3"].Value = "订单号:";
                     汇总表.Cells["B3"].Value = 订单编号;
-                    汇总表.Cells["C3"].Value = "客户代码:";
+                    汇总表.Cells["C3:D3"].Merge = true;
+                    汇总表.Cells["C3"].Value = "客户代码:" + 变量.客户代码;
                     汇总表.Cells["E3:I3"].Merge = true;
-                    汇总表.Cells["E3"].Value = "完成时间:";
+                    string 转换后时间 = 变量.完成时间.Replace("-", ".");
+                    汇总表.Cells["E3"].Value = "完成时间:" + 变量.完成时间;
                     // D3-I3保持空白
 
                     // 第4行设置
                     汇总表.Cells["A4:B4"].Merge = true;
-                    汇总表.Cells["A4"].Value = "制单日期:";
+                    string 制单日期 = DateTime.Now.ToString("yyyy.MM.dd");
+                    汇总表.Cells["A4"].Value = "制单日期:" + 制单日期;
+
+                    //连接名:     以太网
+                    string MAC地址 = 获取MAC地址();
                     汇总表.Cells["C4:D4"].Merge = true;
-                    汇总表.Cells["C4"].Value = "制单人:";
+                    if (MAC地址 == "98:EE:CB:91:F4:72") { 汇总表.Cells["C4"].Value = "制单人:张水升"; }
+                    else if (MAC地址 == "04:D9:C8:BE:16:4F") { 汇总表.Cells["C4"].Value = "制单人:钟珊玲"; }
+                    else if (MAC地址 == "04:D9:C8:BE:3F:2A") { 汇总表.Cells["C4"].Value = "制单人:刘丽 "; }
+                    else if (MAC地址 == "44:39:C4:55:F7:BF") { 汇总表.Cells["C4"].Value = "制单人:何秀群 "; }
+                    else if (MAC地址 == "04:D9:C8:BE:3E:C8") { 汇总表.Cells["C4"].Value = "制单人:巫艳红 "; }
+                    else { 汇总表.Cells["C4"].Value = "制单人:未登记"; }
+
                     汇总表.Cells["E4:G4"].Merge = true;
-                    汇总表.Cells["E4"].Value = "业务员:";
+                    汇总表.Cells["E4"].Value = "业务员:" + 变量.业务员;
                     汇总表.Cells["H4:I4"].Merge = true;
                     汇总表.Cells["H4"].Value = "TO: 仓库、品质、包装、配件";
 
@@ -1938,17 +1887,26 @@ namespace 包装计算
                     汇总表.Row(6).Height = 34.5;
 
                     // 设置列宽
-                    for (int col = 1; col <= 9; col++)
-                    {
-                        汇总表.Column(col).AutoFit();
-                    }
+                    汇总表.Column(1).Width = 6.86; // 根据需要调整数值
+                    汇总表.Column(2).Width = 16.29;
+                    汇总表.Column(3).Width = 20.43;
+                    汇总表.Column(4).Width = 29;
+                    汇总表.Column(5).Width = 6.29;
+                    汇总表.Column(6).Width = 8.43;
+                    汇总表.Column(7).Width = 8.43;
+                    汇总表.Column(8).Width = 14.57;
+                    汇总表.Column(9).Width = 10.57;
+                    //for (int col = 1; col <= 9; col++)
+                    //{
+                    //    汇总表.Column(col).AutoFit();
+                    //}
 
                     // 设置标题字体
                     汇总表.Cells["A2"].Style.Font.Size = 14;
                     汇总表.Cells["A2"].Style.Font.Bold = true;
 
                     // 设置特定单元格的字体加粗
-                    var boldCells = new[] { "A3", "C3","E3","E4", "A4", "H4","B4", "C4", "F4" };
+                    var boldCells = new[] { "A3", "B3", "C3", "E3", "E4", "A4", "H4", "B4", "C4", "F4" };
                     foreach (var cell in boldCells)
                     {
                         汇总表.Cells[cell].Style.Font.Bold = true;
@@ -1968,8 +1926,12 @@ namespace 包装计算
                     currentRow = 汇总表.Dimension.End.Row + 1;
                 }
 
+
                 // 创建一个HashSet来跟踪已处理的组合
                 HashSet<string> 已处理组合 = new HashSet<string>();
+
+                // 用于跟踪纸箱总数量
+                int 纸箱总数量 = 0;
 
                 if (包装资料 != null)
                 {
@@ -2001,7 +1963,7 @@ namespace 包装计算
                         }
 
                         // 添加半成品BOM信息
-                        汇总表.Cells[currentRow, 1].Value =序号前缀;
+                        汇总表.Cells[currentRow, 1].Value = 序号前缀;
                         汇总表.Cells[currentRow, 2].Value = "半成品BOM物料码";
                         汇总表.Cells[currentRow, 3].Value = bom物料码;
                         汇总表.Cells[currentRow, 4].Value = " ";
@@ -2014,19 +1976,21 @@ namespace 包装计算
                         半成品BOM.Style.Border.Left.Style = ExcelBorderStyle.Thin;
                         半成品BOM.Style.Border.Right.Style = ExcelBorderStyle.Thin;
                         半成品BOM.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                        半成品BOM.Style.Font.Bold = true;
+                        汇总表.Row(currentRow).Height = 24.75;
 
                         currentRow++;
 
                         // 添加POF热缩袋信息
                         if (!string.IsNullOrEmpty(包装资料.POF热缩袋))
                         {
-                            
+
                             汇总表.Cells[currentRow, 2].Value = "POF热缩袋";
                             汇总表.Cells[currentRow, 3].Value = 包装资料.POF热缩袋;
                             汇总表.Cells[currentRow, 4].Value = 包装资料.POF热缩袋_系统尺寸;
                             汇总表.Cells[currentRow, 5].Value = 需求数量;
                             汇总表.Cells[currentRow, 6].Value = "#N/A";
-                            汇总表.Cells[currentRow, 11].Value = 当前文件名; 
+                            汇总表.Cells[currentRow, 11].Value = 当前文件名;
 
                             // 设置POF热缩袋行的样式
                             var pof范围 = 汇总表.Cells[currentRow, 1, currentRow, 9];
@@ -2036,6 +2000,9 @@ namespace 包装计算
                             pof范围.Style.Border.Left.Style = ExcelBorderStyle.Thin;
                             pof范围.Style.Border.Right.Style = ExcelBorderStyle.Thin;
                             pof范围.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                            pof范围.Style.Font.Bold = true;
+                            汇总表.Row(currentRow).Height = 24.75;
+
 
                             currentRow++;
                         }
@@ -2043,13 +2010,13 @@ namespace 包装计算
                         // 添加全棉织带信息
                         if (!string.IsNullOrEmpty(包装资料.全棉织带))
                         {
-                            
+
                             汇总表.Cells[currentRow, 2].Value = "全棉织带";
                             汇总表.Cells[currentRow, 3].Value = 包装资料.全棉织带;
                             汇总表.Cells[currentRow, 4].Value = 包装资料.全棉织带_系统尺寸;
                             汇总表.Cells[currentRow, 5].Value = 需求数量;
                             汇总表.Cells[currentRow, 6].Value = "#N/A";
-                            汇总表.Cells[currentRow, 11].Value = 当前文件名; 
+                            汇总表.Cells[currentRow, 11].Value = 当前文件名;
 
                             // 设置全棉织带行的样式
                             var 织带范围 = 汇总表.Cells[currentRow, 1, currentRow, 9];
@@ -2059,6 +2026,9 @@ namespace 包装计算
                             织带范围.Style.Border.Left.Style = ExcelBorderStyle.Thin;
                             织带范围.Style.Border.Right.Style = ExcelBorderStyle.Thin;
                             织带范围.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                            织带范围.Style.Font.Bold = true;
+                            汇总表.Row(currentRow).Height = 24.75;
+
 
                             currentRow++;
                         }
@@ -2073,7 +2043,10 @@ namespace 包装计算
                             汇总表.Cells[currentRow, 5].Value = 纸箱信息.Item2;  // 使用Item2获取数量
                             汇总表.Cells[currentRow, 6].Value = "#N/A";
                             汇总表.Cells[currentRow, 9].Value = $"{纸箱信息.Item3}盒装标准";
-                            汇总表.Cells[currentRow, 11].Value = 当前文件名; 
+                            汇总表.Cells[currentRow, 11].Value = 当前文件名;
+
+                            // 累加纸箱数量
+                            纸箱总数量 += 纸箱信息.Item2;
 
                             // 设置纸箱行的样式
                             var range = 汇总表.Cells[currentRow, 1, currentRow, 9];
@@ -2083,23 +2056,174 @@ namespace 包装计算
                             range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
                             range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
                             range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                            range.Style.Font.Bold = true;
+                            汇总表.Row(currentRow).Height = 24.75;
+
 
                             currentRow++;
                         }
+
+
+                        // 处理配件说明书信息
+                        List<int> 不用下操作指引的客户 = new List<int> { 12573, 12095, 12056, 16066, 12058, 12251, 17100, 12075, 13009, 12233, 18236, 12141, 13086, 12020, 14035, 14029 };
+
+                        // 检查客户代码是否在目标列表中
+                        if (!不用下操作指引的客户.Any(客户代码 => 变量.客户代码.Contains(客户代码.ToString())))
+                        {
+                            if (变量.包装要求.Contains("中文"))
+                            {
+                                汇总表.Cells[currentRow, 2].Value = "配件说明书";
+                                汇总表.Cells[currentRow, 3].Value = "1006.010021";
+                                汇总表.Cells[currentRow, 4].Value = "中文版中性通用操作指引说明书";
+                                汇总表.Cells[currentRow, 5].Value = 纸箱总数量;  // 使用纸箱总数量
+
+                                // 设置配件说明书行的样式
+                                var 说明书范围 = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                                说明书范围.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Font.Bold = true;
+                                汇总表.Row(currentRow).Height = 24.75;
+
+
+                                currentRow++;
+                            }
+                            else
+                            {
+                                汇总表.Cells[currentRow, 2].Value = "配件说明书";
+                                汇总表.Cells[currentRow, 3].Value = "1006.010020";
+                                汇总表.Cells[currentRow, 4].Value = "英文版中性通用操作指引说明书";
+                                汇总表.Cells[currentRow, 5].Value = 纸箱总数量;  // 使用纸箱总数量
+
+                                // 设置配件说明书行的样式
+                                var 说明书范围 = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                                说明书范围.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Font.Bold = true;
+                                汇总表.Row(currentRow).Height = 24.75;
+
+
+                                currentRow++;
+                            }
+
+                            if (变量.标签.Contains("UL 676"))
+                            {
+                                汇总表.Cells[currentRow, 2].Value = "配件说明书";
+                                汇总表.Cells[currentRow, 3].Value = "1006.010022";
+                                汇总表.Cells[currentRow, 4].Value = "英文版UL676产品系列通用";
+                                汇总表.Cells[currentRow, 5].Value = 纸箱总数量;  // 使用纸箱总数量
+
+                                // 设置配件说明书行的样式
+                                var 说明书范围 = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                                说明书范围.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Font.Bold = true;
+                                汇总表.Row(currentRow).Height = 24.75;
+
+
+                                currentRow++;
+                            }
+
+                            if (变量.标签.Contains("水下"))
+                            {
+                                汇总表.Cells[currentRow, 2].Value = "配件说明书";
+                                汇总表.Cells[currentRow, 3].Value = "1006.010023";
+                                汇总表.Cells[currentRow, 4].Value = "英文版UL2108/CE产品系列水下方案说明书通用";
+                                汇总表.Cells[currentRow, 5].Value = 纸箱总数量;  // 使用纸箱总数量
+
+                                // 设置配件说明书行的样式
+                                var 说明书范围 = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                                说明书范围.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                                说明书范围.Style.Font.Bold = true;
+                                汇总表.Row(currentRow).Height = 24.75;
+
+
+                                currentRow++;
+                            }
+                        }
+
+
                     }
+
+
 
                     // 自动调整列宽
-                    for (int col = 1; col <= 9; col++)
-                    {
-                        汇总表.Column(col).AutoFit();
-                    }
+                    //for (int col = 1; col <= 9; col++)
+                    //{
+                    //    汇总表.Column(col).AutoFit();
+                    //}
 
-                    汇总包.Save();
+
 
                 }
 
+                // 在保存汇总包之前，查询并更新仓位信息
+                string 仓位文件路径 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "新包装资料", "仓位.xlsx");
 
-                
+                // 检查仓位文件是否存在
+                if (File.Exists(仓位文件路径))
+                {
+                    // 创建一个字典来存储物料编码和对应的仓位
+                    Dictionary<string, string> 仓位字典 = new Dictionary<string, string>();
+
+                    // 读取仓位文件
+                    using (ExcelPackage 仓位包 = new ExcelPackage(new FileInfo(仓位文件路径)))
+                    {
+                        ExcelWorksheet 仓位表 = 仓位包.Workbook.Worksheets[0]; // 假设仓位信息在第一个工作表
+
+                        // 获取已使用的行数
+                        int 行数 = 仓位表.Dimension?.End.Row ?? 0;
+
+                        // 读取所有物料编码和对应的仓位
+                        for (int row = 1; row <= 行数; row++)
+                        {
+                            string 物料编码 = 仓位表.Cells[row, 1].Text?.Trim() ?? "";
+                            string 仓位 = 仓位表.Cells[row, 2].Text?.Trim() ?? "";
+
+                            if (!string.IsNullOrEmpty(物料编码))
+                            {
+                                仓位字典[物料编码] = 仓位;
+                            }
+                        }
+                    }
+
+                    // 遍历汇总表中的所有行，查找并更新仓位信息
+                    ExcelWorksheet 汇总工作表 = 汇总包.Workbook.Worksheets["包装材料需求流转单"];
+                    if (汇总工作表 != null)
+                    {
+                        int 最大行 = 汇总工作表.Dimension?.End.Row ?? 0;
+
+                        // 从第7行开始查找物料编码（根据图片，第7行开始是数据行）
+                        for (int row = 7; row <= 最大行; row++)
+                        {
+                            // 获取物料编码（C列）
+                            string 物料编码 = 汇总工作表.Cells[row, 3].Text?.Trim() ?? "";
+
+                            if (!string.IsNullOrEmpty(物料编码))
+                            {
+                                // 查找对应的仓位
+                                string 仓位 = "#N/A";
+                                if (仓位字典.ContainsKey(物料编码))
+                                {
+                                    仓位 = 仓位字典[物料编码];
+                                }
+
+                                // 更新仓位信息（G列）
+                                汇总工作表.Cells[row, 6].Value = 仓位;
+                            }
+                        }
+                    }
+                }
+
+                汇总包.Save();
             }
 
             uiTextBox_状态.AppendText($"包装汇总已更新到 {汇总文件路径}" + Environment.NewLine);
@@ -2107,6 +2231,8 @@ namespace 包装计算
 
 
         }
+
+        
 
         private string 获取系统尺寸(int 盒数, dynamic 包装资料)
         {
@@ -2131,36 +2257,459 @@ namespace 包装计算
             var 结果 = new List<(string 编号, int 数量, int 盒数)>();
             int 剩余盒数 = 总盒数;
 
-            // 优先使用大容量的纸箱
-            if (!string.IsNullOrEmpty(包装资料.五盒装选用) && 剩余盒数 >= 5)
+            if (变量.是否RU客户)
             {
-                int 五盒装数量 = 剩余盒数 / 5;
-                结果.Add((包装资料.五盒装选用, 五盒装数量, 5));
-                剩余盒数 %= 5;
+                // 优先使用大容量的纸箱
+                if (!string.IsNullOrEmpty(包装资料.五盒装选用) && 剩余盒数 >= 5)
+                {
+                    int 五盒装数量 = 剩余盒数 / 5;
+                    结果.Add((包装资料.五盒装选用, 五盒装数量, 5));
+                    剩余盒数 %= 5;
+                }
+
+                if (!string.IsNullOrEmpty(包装资料.三盒装选用) && 剩余盒数 >= 3)
+                {
+                    int 三盒装数量 = 剩余盒数 / 3;
+                    结果.Add((包装资料.三盒装选用, 三盒装数量, 3));
+                    剩余盒数 %= 3;
+                }
+
+                if (!string.IsNullOrEmpty(包装资料.二盒装选用) && 剩余盒数 >= 2)
+                {
+                    int 二盒装数量 = 剩余盒数 / 2;
+                    结果.Add((包装资料.二盒装选用, 二盒装数量, 2));
+                    剩余盒数 %= 2;
+                }
+
+                if (!string.IsNullOrEmpty(包装资料.单盒装选用) && 剩余盒数 > 0)
+                {
+                    结果.Add((包装资料.单盒装选用, 剩余盒数, 1));
+                }
+
+                return 结果;
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(包装资料.三盒装选用) && 剩余盒数 >= 3)
+                {
+                    int 三盒装数量 = 剩余盒数 / 3;
+                    结果.Add((包装资料.三盒装选用, 三盒装数量, 3));
+                    剩余盒数 %= 3;
+                }
+
+                if (!string.IsNullOrEmpty(包装资料.二盒装选用) && 剩余盒数 >= 2)
+                {
+                    int 二盒装数量 = 剩余盒数 / 2;
+                    结果.Add((包装资料.二盒装选用, 二盒装数量, 2));
+                    剩余盒数 %= 2;
+                }
+
+                if (!string.IsNullOrEmpty(包装资料.单盒装选用) && 剩余盒数 > 0)
+                {
+                    结果.Add((包装资料.单盒装选用, 剩余盒数, 1));
+                }
+
+                return 结果;
             }
 
-            if (!string.IsNullOrEmpty(包装资料.三盒装选用) && 剩余盒数 >= 3)
-            {
-                int 三盒装数量 = 剩余盒数 / 3;
-                结果.Add((包装资料.三盒装选用, 三盒装数量, 3));
-                剩余盒数 %= 3;
-            }
 
-            if (!string.IsNullOrEmpty(包装资料.二盒装选用) && 剩余盒数 >= 2)
-            {
-                int 二盒装数量 = 剩余盒数 / 2;
-                结果.Add((包装资料.二盒装选用, 二盒装数量, 2));
-                剩余盒数 %= 2;
-            }
-
-            if (!string.IsNullOrEmpty(包装资料.单盒装选用) && 剩余盒数 > 0)
-            {
-                结果.Add((包装资料.单盒装选用, 剩余盒数, 1));
-            }
-
-            return 结果;
         }
 
+        private async void uiButton2_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (变量.订单附件匹配列表.Count == 0)
+                {
+                    MessageBox.Show("没有找到匹配的订单和附件信息", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                新包装 包装查询 = new 新包装();
+
+                foreach (var 匹配信息 in 变量.订单附件匹配列表)
+                {
+                    string 型号SHEET = 匹配信息.工作表名称;
+                    string 产品型号 = 匹配信息.产品型号;
+
+                    // 查找对应型号的灯带尺寸
+                    var 灯带尺寸 = 变量.灯带尺寸列表.FirstOrDefault(x => x.型号 == 产品型号.Replace("B", ""));
+                    if (灯带尺寸 == null)
+                    {
+                        MessageBox.Show($"未找到型号 {产品型号} 的尺寸数据", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        continue;
+                    }
+
+                    // 获取订单中该型号的出线方式
+                    var 订单出线信息 = 变量.订单出线字典[匹配信息.订单编号]
+                        .FirstOrDefault(x => x.Item1 == 产品型号);
+
+                    if (订单出线信息 == default)
+                    {
+                        MessageBox.Show($"未找到型号 {产品型号} 的出线方式信息", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        continue;
+                    }
+
+                    // 确定包装类型
+                    string 包装类型;
+                    if (订单出线信息.Item2.Count == 0)
+                    {
+                        包装类型 = "多条或短条包装";
+                    }
+                    else
+                    {
+                        包装类型 = 订单出线信息.Item2.First(); // 使用第一个出线方式
+                    }
+
+                    // 获取候选包装列表
+                    List<新包装资料> 候选包装列表 = 包装查询.获取候选包装列表(产品型号, 包装类型);
+
+                    if (候选包装列表.Any())
+                    {
+                        string 使用的表名;
+                        var 当前工作表匹配 = 变量.订单附件匹配列表.FirstOrDefault(x =>
+                            x.产品型号 == 产品型号 &&
+                            Math.Abs(x.销售数量 - 匹配信息.销售数量) < 0.001);
+
+                        if (当前工作表匹配 != null)
+                        {
+                            使用的表名 = 当前工作表匹配.工作表名称;
+                        }
+                        else
+                        {
+                            使用的表名 = 产品型号;
+                            MessageBox.Show($"未找到匹配信息，使用产品型号作为表名: {使用的表名}",
+                                           "工作表名称调试",
+                                           MessageBoxButtons.OK,
+                                           MessageBoxIcon.Warning);
+                        }
+
+                        if (!变量.附件表数据.ContainsKey(使用的表名))
+                        {
+                            MessageBox.Show($"错误：找不到表名 {使用的表名} 的数据！\n" +
+                                           $"可用的表名：{string.Join(", ", 变量.附件表数据.Keys)}",
+                                           "错误",
+                                           MessageBoxButtons.OK,
+                                           MessageBoxIcon.Error);
+                            continue;
+                        }
+
+                        int 数据条数 = 变量.附件表数据[使用的表名].Count - 1;
+
+                        // 对每个候选包装进行AI分析
+                        List<(新包装资料 包装, double 评分)> 包装评分列表 = new List<(新包装资料, double)>();
+
+                        foreach (var 包装 in 候选包装列表)
+                        {
+                            var AI建议 = await 获取AI包装建议(产品型号, 包装类型, 数据条数, 包装);
+                            double 评分 = 解析AI评分(AI建议);
+                            包装评分列表.Add((包装, 评分));
+                        }
+
+                        // 选择评分最高的包装
+                        var 最佳包装 = 包装评分列表.OrderByDescending(x => x.评分).First();
+                        var 包装资料 = 最佳包装.包装;
+
+                        // 保存完整的包装资料到匹配信息中
+                        匹配信息.选中包装资料 = 包装资料;
+
+                        if (包装资料 != null)
+                        {
+                            // 计算实际可用面积
+                            double 实际面积 = (包装资料.总有效面积 - 包装资料.内撑纸卡面积) * 0.7;
+                            变量.查找组合_基数 = 实际面积;
+
+                            uiTextBox_状态.AppendText($"型号 {产品型号} 使用包装: {包装资料.包装名称}" + Environment.NewLine);
+                            uiTextBox_状态.AppendText($"总面积: {包装资料.总有效面积}" + Environment.NewLine);
+                            uiTextBox_状态.AppendText($"实际可用面积: {实际面积}" + Environment.NewLine);
+                            uiTextBox_状态.AppendText($"灯带数量: {数据条数}条" + Environment.NewLine);
+
+                            string 包装类型说明 = 包装资料.是多条短条专用包装 ? "多条专用包装" :
+                                              包装资料.允许多条包装 ? "多条包装" : "普通包装";
+                            uiTextBox_状态.AppendText($"包装类型: {包装类型说明}" + Environment.NewLine);
+                            uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
+                        }
+                        else
+                        {
+                            MessageBox.Show($"未找到型号 {产品型号} 出线方式 {包装类型} 的匹配包装", "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            变量.查找组合_基数 = 1420 - 706;
+                            uiTextBox_状态.AppendText($"型号 {产品型号} 使用默认包装容积: {变量.查找组合_基数}" + Environment.NewLine);
+                            uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
+                        }
+
+                        // 调用开始组合方法
+                        开始组合(型号SHEET, 产品型号, 匹配信息.订单编号);
+                    }
+                    else
+                    {
+                        MessageBox.Show($"未找到型号 {产品型号} 出线方式 {包装类型} 的候选包装", "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        变量.查找组合_基数 = 1420 - 706;
+                        uiTextBox_状态.AppendText($"型号 {产品型号} 使用默认包装容积: {变量.查找组合_基数}" + Environment.NewLine);
+                        uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"处理过程中出错：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+
+        private double 解析AI评分(string ai建议)
+        {
+            try
+            {
+                // 查找"适用度评分："后面的数字
+                var 评分行 = ai建议.Split('\n')
+                    .FirstOrDefault(line => line.Trim().StartsWith("适用度评分："));
+
+                if (评分行 != null)
+                {
+                    var 评分文本 = 评分行.Split('：')[1].Trim();
+                    if (double.TryParse(评分文本, out double 评分))
+                    {
+                        return 评分;
+                    }
+                }
+
+                // 如果没有找到评分，返回默认值
+                return 50; // 默认中等评分
+            }
+            catch
+            {
+                return 50; // 出错时返回默认中等评分
+            }
+        }
+
+
+
+        private async Task<string> 获取AI包装建议(string 灯带型号, string 出线方式, int 数据条数, 新包装资料 选中包装)
+        {
+            const string apiKey = "sk-9S1Znc8NehWPQflzDqESpNL1xYykJNVcFCAko0RoeOuBhgzu";
+            const string apiUrl = "https://www.dmxapi.com/v1/chat/completions";  // 移除末尾的斜杠
+
+            try
+            {
+                // 构造包装信息描述
+                var 包装描述 = $"包装名称: {选中包装.包装名称}\n" +
+                            $"适用产品: {string.Join(", ", 选中包装.装箱产品型号)}\n" +
+                            $"包装尺寸: {选中包装.总有效面积}*{选中包装.高度}\n" +
+                            $"单盒装选用: {选中包装.单盒装选用}\n" +
+                            $"二盒装选用: {选中包装.二盒装选用}\n" +
+                            $"三盒装选用: {选中包装.三盒装选用}";
+
+                // 构造请求数据
+                var requestData = new
+                {
+                    model = "claude-3-5-sonnet-20240620",
+                    messages = new[]
+                    {
+                new
+                {
+                    role = "user",
+                    content = $@"请分析以下包装方案是否适合这个产品：
+                    产品信息：
+                    - 灯带型号：{灯带型号}
+                    - 出线方式：{出线方式}
+                    - 数据条数：{数据条数}
+
+                    选择的包装方案：
+                    {包装描述}
+
+                     请从以下几个方面分析并给出评分：
+                    1. 产品型号匹配度（0-30分）
+                    2. 包装空间利用率（0-40分）
+                    3. 操作便利性（0-30分）
+
+                    请按以下格式返回：
+                    适用度评分：XX
+                    详细分析：
+                    1. 产品型号匹配度：XX分
+                    原因：...
+                    2. 包装空间利用率：XX分
+                    原因：...
+                    3. 操作便利性：XX分
+                    原因：...
+                    总体建议：..."
+                }
+            },
+                    temperature = 0.7,
+                    max_tokens = 1000
+                };
+
+                using (var client = new HttpClient())
+                {
+                    // 修改认证头的设置
+                    client.DefaultRequestHeaders.Clear();
+                    client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                    client.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+
+                    var jsonContent = System.Text.Json.JsonSerializer.Serialize(requestData);
+                    var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                    var response = await client.PostAsync(apiUrl, httpContent);
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var responseJson = await response.Content.ReadAsStringAsync();
+                        var responseObj = System.Text.Json.JsonDocument.Parse(responseJson);
+
+                        // 修改响应解析逻辑
+                        if (responseObj.RootElement.TryGetProperty("choices", out var choices) &&
+                            choices.GetArrayLength() > 0)
+                        {
+                            return choices[0].GetProperty("message")
+                                           .GetProperty("content")
+                                           .GetString();
+                        }
+                    }
+                    else
+                    {
+                        var errorResponse = await response.Content.ReadAsStringAsync();
+                        return $"API调用失败: {response.StatusCode}\n{errorResponse}";
+                    }
+                }
+                return "无法获取AI分析结果";
+            }
+            catch (Exception ex)
+            {
+                return $"AI分析出错: {ex.Message}";
+            }
+        }
+
+        private void uiCheckBox_RU客户_CheckedChanged(object sender, EventArgs e)
+        {
+            变量.是否RU客户 = uiCheckBox_RU客户.Checked;
+        }
+
+        private void uiTextBox_订单地址_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void uiButton3_Click(object sender, EventArgs e)
+        {
+            混合处理();
+
+            try
+            {
+                string 文件夹路径 = Path.Combine(Application.StartupPath, "输出结果", 变量.订单编号);
+                string 处理好订单文件夹路径 = Path.Combine(文件夹路径, "订单资料");
+
+                // 获取订单资料文件夹中的所有Excel文件
+                var Excel文件列表 = Directory.GetFiles(处理好订单文件夹路径, "*.xlsx");
+
+                foreach (var 文件路径 in Excel文件列表)
+                {
+
+                    using (ExcelPackage package = new ExcelPackage(new FileInfo(文件路径)))
+                    {
+                        var worksheet = package.Workbook.Worksheets[0];
+
+                        // 读取基本信息
+                        string 型号 = worksheet.Cells[1, 2].Text;
+                        string 出线方式 = worksheet.Cells[5, 2].Text;
+
+                        // 创建长度列表
+                        var 长度列表 = new List<(string 序号, double 灯带长度, double 线材长度)> ();
+
+                        // 从第8行开始读取数据
+                        int currentRow = 8;
+                        while (!string.IsNullOrEmpty(worksheet.Cells[currentRow, 2].Text))
+                        {
+                            int 数量;
+                            if (int.TryParse(worksheet.Cells[currentRow, 2].Text, out 数量))
+                            {
+                                string 序号 = worksheet.Cells[currentRow, 1].Text?.Trim(); // 从第1列读取序号
+                                double 灯带长度;
+                                double 线材长度;
+
+                                if (double.TryParse(worksheet.Cells[currentRow, 3].Text, out 灯带长度) &&
+                                    double.TryParse(worksheet.Cells[currentRow, 4].Text, out 线材长度))
+                                {
+                                    // 根据数量添加多条记录
+                                    for (int i = 0; i < 数量; i++)
+                                    {
+                                        长度列表.Add((序号, 灯带长度, 线材长度));
+                                    }
+                                }
+                            }
+
+                            currentRow++;
+                        }
+
+                        if (长度列表.Count > 0)
+                        {
+                            // 构建提示信息
+                            StringBuilder sb = new StringBuilder();
+                            sb.AppendLine($"文件名: {Path.GetFileName(文件路径)}");
+                            sb.AppendLine($"型号: {型号}");
+                            sb.AppendLine($"出线方式: {出线方式}");
+                            sb.AppendLine($"总条数: {长度列表.Count}");
+                            sb.AppendLine("\n长度明细:");
+
+                            // 按长度分组并统计数量
+                            var 分组统计 = 长度列表
+                                .GroupBy(x => (x.灯带长度, x.线材长度))
+                                .Select(g => (g.Key.灯带长度, g.Key.线材长度, 数量: g.Count()))
+                                .OrderByDescending(x => x.灯带长度);
+
+                            foreach (var 组 in 分组统计)
+                            {
+                                sb.AppendLine($"灯带长度: {组.灯带长度:F2}m, 线材长度: {组.线材长度:F2}m, 数量: {组.数量}条");
+                            }
+
+                            // 显示提示信息
+                            //MessageBox.Show(sb.ToString(), "读取到的数据");
+                            当前处理文件名 = 文件路径;
+                            保存日志(sb.ToString(), "读取到的数据", Path.GetFileName(当前处理文件名));
+
+
+                            // 调用查找包装方法
+                            查找合适包装_0(长度列表, 型号, 出线方式);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"处理Excel文件出错: {ex.Message}\n\n{ex.StackTrace}", "错误");
+            }
+
+
+
+            string 文件夹路径1 = Path.Combine(Application.StartupPath, "输出结果", 变量.订单编号);
+            添加配件说明书_5(文件夹路径1);
+
+        }
+
+
+        private void 保存日志(string 内容, string 日志类型, string excel文件名)
+        {
+            try
+            {
+                // 创建日志文件路径
+                string 日志文件名 = Path.GetFileNameWithoutExtension(excel文件名) + $"_{日志类型}.txt";
+                string 日志文件路径 = Path.Combine(
+                    Application.StartupPath,
+                    "输出结果",
+                    变量.订单编号,
+                    "计算日志",
+                    日志文件名
+                );
+
+                // 确保日志文件夹存在
+                Directory.CreateDirectory(Path.GetDirectoryName(日志文件路径));
+
+                // 保存日志文件
+                File.WriteAllText(日志文件路径, 内容, Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"保存日志出错: {ex.Message}", "错误");
+            }
+        }
 
 
     }
