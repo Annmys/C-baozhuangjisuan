@@ -1,7 +1,8 @@
 ﻿using OfficeOpenXml; // EPPlus的命名空间.
+using OfficeOpenXml.Style;
+using Sunny.UI;
 using System.Text; // 添加这行用于StringBuilder
 using System.Text.RegularExpressions;
-using OfficeOpenXml.Style;
 
 namespace 包装计算
 {
@@ -10,8 +11,8 @@ namespace 包装计算
         private string 带销售数量型号 = "";
         private string 当前处理文件名 = "";
         private Dictionary<string, 包装数据> 包装数据字典;
-
-
+        private string 当前选择算法 = "常规三选一最优方案"; // 默认值
+        private Dictionary<string, List<string>> 标签码1分组字典 = new Dictionary<string, List<string>>();
 
         public class 包装数据
         {
@@ -40,6 +41,11 @@ namespace 包装计算
             public string 五盒装外箱 { get; set; }
             public string 五盒装尺寸 { get; set; }
 
+            // 添加通口箱相关属性
+            public string 通口箱 { get; set; }
+
+            public string 通口箱尺寸 { get; set; }
+
             // 产品型号信息列表
             public List<产品型号信息> 支持产品型号列表 { get; set; } = new List<产品型号信息>();
         }
@@ -56,11 +62,42 @@ namespace 包装计算
 
         public class 包装方案
         {
-            public List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度)> 包含灯带)> 多条包装列表 { get; set; }
-                = new List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度)>)>();
+            public List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表 { get; set; }
+                = new List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>)>();
 
-            public List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度)> 单条包装列表 { get; set; }
-                = new List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度)>();
+            public List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表 { get; set; }
+                = new List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>();
+
+            // 添加新属性
+            public string 方案名称 { get; set; } = "默认方案";
+
+            public double 空间利用率 { get; set; }
+            public double 评分 { get; set; }
+
+            // 计算总条数
+            public int 总条数
+            {
+                get
+                {
+                    int 多条总数 = 多条包装列表.Sum(x => x.包含灯带.Count);
+                    int 单条总数 = 单条包装列表.Count;
+                    return 多条总数 + 单条总数;
+                }
+            }
+
+            // 计算盒子数量
+            public int 盒子数量
+            {
+                get
+                {
+                    return 多条包装列表.Count + 单条包装列表.Count;
+                }
+            }
+
+            public override string ToString()
+            {
+                return $"{方案名称} - {盒子数量}盒 - 利用率:{空间利用率:P1}";
+            }
         }
 
         /// <summary>
@@ -108,7 +145,11 @@ namespace 包装计算
                             二盒装外箱 = worksheet.Cells[2, 11].Text?.Trim(),
                             二盒装尺寸 = worksheet.Cells[2, 12].Text?.Trim(),
                             三盒装外箱 = worksheet.Cells[2, 13].Text?.Trim(),
-                            三盒装尺寸 = worksheet.Cells[2, 14].Text?.Trim()
+                            三盒装尺寸 = worksheet.Cells[2, 14].Text?.Trim(),
+
+                            // 添加通口箱信息读取
+                            通口箱 = worksheet.Cells[2, 17].Text?.Trim(),  // 假设通口箱信息在第15列
+                            通口箱尺寸 = worksheet.Cells[2, 18].Text?.Trim()  // 假设通口箱尺寸在第16列
                         };
 
                         // 查找产品型号信息起始行
@@ -162,9 +203,10 @@ namespace 包装计算
             return 包装数据字典;
         }
 
-        private void ProcessSection(ExcelWorksheet worksheet, int startRow, int endRow, int 规格型号列, int 物料编码列, int 销售数量列, int 剪切长度列,
-                                     ref string 当前型号, ref HashSet<string> 当前出线方式, ref string 物料编码, ref double 当前销售数量)
+        private void 获取订单数据(ExcelWorksheet worksheet, int startRow, int endRow, int 规格型号列, int 物料编码列, int 销售数量列, int 剪切长度列,
+                                     ref string 当前型号, ref HashSet<string> 当前出线方式, ref string 物料编码, ref double 当前销售数量, ref string 当前客户型号, ref string 标签要求)
         {
+            //MessageBox.Show(当前客户型号, "客户型号");
             string 线长 = "";
             // 获取主行信息
             var mainSpecCell = worksheet.Cells[startRow, 规格型号列];
@@ -173,6 +215,7 @@ namespace 包装计算
 
             // 动态获取备注列
             int 备注列 = 获取备注列索引(worksheet);
+
             List<double> 区间线长列表 = new List<double>();
 
             string 规格型号 = mainSpecCell.Text;
@@ -254,9 +297,9 @@ namespace 包装计算
                     {
                         基础出线方式.Add("端部出线");
                     }
-                    if (当前行规格型号.Contains("侧部出线"))
+                    if (当前行规格型号.Contains("侧部出线") || 当前行规格型号.Contains("侧面出线"))
                     {
-                        基础出线方式.Add("侧部出线");
+                        基础出线方式.Add("侧面出线");
                     }
                     if (当前行规格型号.Contains("底部出线"))
                     {
@@ -281,6 +324,52 @@ namespace 包装计算
                     区间线长列表.Add(最终线长);
                 }
             }
+
+            //标签要求
+            string 文件夹路径 = Path.Combine(Application.StartupPath, "输出结果", 变量.订单编号);
+            string 处理好订单文件夹路径 = Path.Combine(文件夹路径, "订单资料");
+            if (!Directory.Exists(处理好订单文件夹路径))
+            {
+                Directory.CreateDirectory(处理好订单文件夹路径);
+            }
+            string 单位文件路径 = Path.Combine(处理好订单文件夹路径, "单位.txt");
+            string 单位内容 = "m"; // 默认
+
+            //MessageBox.Show(标签要求);
+
+            if (!string.IsNullOrWhiteSpace(标签要求))
+            {
+                string t = 标签要求;
+
+                // 1. 毫米
+                if (t.Contains("毫米") || t.Contains("mm") || t.Contains("MM"))
+                {
+                    单位内容 = "mm";
+                }
+                // 2. m和Ft共存
+                else if ((t.Contains("m") || t.Contains("M") || t.Contains("米制")) &&
+                         (t.Contains("Ft") || t.Contains("FT") || t.Contains("ft") || t.Contains("英尺") || t.Contains("英制")))
+                {
+                    单位内容 = "m(Ft)";
+                }
+                // 3. m和IN共存
+                else if ((t.Contains("m") || t.Contains("M")) &&
+                         (t.Contains("IN") || t.Contains("in") || t.Contains("英寸")))
+                {
+                    单位内容 = "m(IN)";
+                }
+                // 4. 有Ft/英尺
+                else if (t.Contains("Ft") || t.Contains("FT") || t.Contains("ft") || t.Contains("英尺"))
+                {
+                    单位内容 = "Ft";
+                }
+                // 5. 有IN/英寸
+                else if (t.Contains("IN") || t.Contains("in") || t.Contains("英寸"))
+                {
+                    单位内容 = "IN";
+                }
+            }
+            File.WriteAllText(单位文件路径, 单位内容);
 
             // 计算区间的总线长
             double 区间总线长 = 区间线长列表.Sum();
@@ -355,7 +444,7 @@ namespace 包装计算
                         );
                         变量.订单附件匹配列表.Add(匹配信息);
 
-                        保存订单_附件型号Excel文件(当前型号, 当前出线方式, 当前行销售数量, 物料编码, 规格型号, true);
+                        保存订单_附件型号Excel文件(当前型号, 当前出线方式, 当前行销售数量, 物料编码, 规格型号, true, 当前客户型号, "");
 
                         //// Debug输出
                         //MessageBox.Show($"添加匹配信息:\n" +
@@ -371,6 +460,7 @@ namespace 包装计算
                         // 处理直接包含长度信息的情况
                         string[] 长度组 = 剪切长度.Split(new[] { ',', '，', ';', '；', '+' }, StringSplitOptions.RemoveEmptyEntries);
                         List<(double 长度, int 数量)> 解析后的长度列表 = new List<(double, int)>();
+
                         foreach (string 单个长度 in 长度组)
                         {
                             var match = Regex.Match(单个长度.Trim(),
@@ -384,15 +474,21 @@ namespace 包装计算
                                 订单汇总数据[当前型号].Add((长度, 数量, "直接长度"));
                                 解析后的长度列表.Add((长度, 数量));
 
-                                保存订单_备注型号Excel文件(当前型号, 当前出线方式, 当前行销售数量, 物料编码, 规格型号, 解析后的长度列表, 线长);
-
-                                //MessageBox.Show($"解析分割后的长度:\n" +
-                                //  $"型号: {当前型号}\n" +
-                                //  $"长度: {长度}米\n" +
-                                //  $"数量: {数量}个\n" +
-                                //  $"原始文本: {单个长度}",
-                                //  "处理结果");
+                                //#if DEBUG // 仅在调试模式下显示消息框
+                                //                                MessageBox.Show($"解析分割后的长度:\n" +
+                                //                                  $"型号: {当前型号}\n" +
+                                //                                  $"长度: {长度}米\n" +
+                                //                                  $"数量: {数量}个\n" +
+                                //                                  $"原始文本: {单个长度}",
+                                //                                  "处理结果");
+                                //#endif
                             }
+                        }
+
+                        // 收集完所有长度信息后，只调用一次保存方法
+                        if (解析后的长度列表.Any())
+                        {
+                            保存订单_备注型号Excel文件(当前型号, 当前出线方式, 当前行销售数量, 物料编码, 规格型号, 解析后的长度列表, 线长, 当前客户型号, "");
                         }
                     }
                 }
@@ -524,7 +620,7 @@ namespace 包装计算
         }
 
         // 添加两个新方法来处理Excel文件保存
-        private void 保存订单_备注型号Excel文件(string 型号, HashSet<string> 出线方式, double 销售数量, string 物料编码, string 规格型号, List<(double 长度, int 数量)> 长度列表, string 线材长度)
+        private void 保存订单_备注型号Excel文件(string 型号, HashSet<string> 出线方式, double 销售数量, string 物料编码, string 规格型号, List<(double 长度, int 数量)> 长度列表, string 线材长度, string 客户型号, string 标签显示长度)
         {
             try
             {
@@ -590,6 +686,8 @@ namespace 包装计算
                     worksheet.Cells[4, 2].Value = 销售数量;
                     worksheet.Cells[5, 1].Value = "出线方式";
                     worksheet.Cells[5, 2].Value = 出线方式 != null ? string.Join("，", 出线方式) : "无";
+                    worksheet.Cells[6, 1].Value = "客户型号";
+                    worksheet.Cells[6, 2].Value = 客户型号;
 
                     // 添加数据表头
                     worksheet.Cells[7, 1].Value = "序号";
@@ -657,7 +755,7 @@ namespace 包装计算
             }
         }
 
-        private void 保存订单_附件型号Excel文件(string 型号, HashSet<string> 出线方式, double 销售数量, string 物料编码, string 规格型号, bool 是附件)
+        private void 保存订单_附件型号Excel文件(string 型号, HashSet<string> 出线方式, double 销售数量, string 物料编码, string 规格型号, bool 是附件, string 客户型号, string 标签显示长度)
         {
             try
             {
@@ -728,15 +826,22 @@ namespace 包装计算
                     worksheet.Cells[4, 2].Value = 销售数量;
                     worksheet.Cells[5, 1].Value = "出线方式";
                     worksheet.Cells[5, 2].Value = 出线方式 != null ? string.Join("，", 出线方式) : "无";
+                    worksheet.Cells[6, 1].Value = "客户型号";
+                    worksheet.Cells[6, 2].Value = 客户型号;
 
                     // 添加数据表头
                     worksheet.Cells[7, 1].Value = "序号";
                     worksheet.Cells[7, 2].Value = "数量";
                     worksheet.Cells[7, 3].Value = "灯带长度";
                     worksheet.Cells[7, 4].Value = "线长长度";
+                    worksheet.Cells[7, 5].Value = "标签码1";  // 添加标签码列
+                    worksheet.Cells[7, 6].Value = "标签码2";
+                    worksheet.Cells[7, 7].Value = "标签码3";
+                    worksheet.Cells[7, 8].Value = "标签码4";
+                    worksheet.Cells[7, 9].Value = "标签显示长度";
 
                     // 设置表头样式
-                    using (var range = worksheet.Cells[7, 1, 7, 4])
+                    using (var range = worksheet.Cells[7, 1, 7, 9])
                     {
                         range.Style.Font.Bold = true;
                         range.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
@@ -757,8 +862,13 @@ namespace 包装计算
                         worksheet.Cells[row, 2].Value = "";
                         worksheet.Cells[row, 3].Value = "";
                         worksheet.Cells[row, 4].Value = ""; // 暂时留空
+                        worksheet.Cells[row, 5].Value = "";
+                        worksheet.Cells[row, 6].Value = "";
+                        worksheet.Cells[row, 7].Value = "";
+                        worksheet.Cells[row, 8].Value = "";
+                        worksheet.Cells[row, 9].Value = "";
 
-                        using (var range = worksheet.Cells[row, 1, row, 4])
+                        using (var range = worksheet.Cells[row, 1, row, 9])
                         {
                             range.Style.Border.Top.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
                             range.Style.Border.Bottom.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
@@ -774,6 +884,11 @@ namespace 包装计算
                     worksheet.Column(2).Width = 10;  // 数量
                     worksheet.Column(3).Width = 15;  // 灯带长度
                     worksheet.Column(4).Width = 15;  // 线长长度
+                    worksheet.Column(5).Width = 20;
+                    worksheet.Column(6).Width = 20;
+                    worksheet.Column(7).Width = 20;
+                    worksheet.Column(8).Width = 20;
+                    worksheet.Column(9).Width = 20;
 
                     // 保存文件
                     package.SaveAs(new FileInfo(保存路径));
@@ -836,11 +951,11 @@ namespace 包装计算
                 }
 
                 // 从附件Excel中读取数据并按序号首字母分组
-                Dictionary<string, List<(string 序号, string 数量, double 灯带长度, double 线长长度)>> 按序号分组的数据
-                    = new Dictionary<string, List<(string, string, double, double)>>();
+                //Dictionary<string, List<(string 序号, string 数量, double 灯带长度, double 线长长度,string 标签码1,string 标签码2,string 标签码3,string 标签码4)>> 按序号分组的数据
+                //    = new Dictionary<string, List<(string, string, double, double,string,string,string,string)>>();
 
                 // 从附件工作表中提取数据
-                List<(string 序号, string 数量, double 灯带长度, double 线长长度)> 长度数据列表 = new List<(string, string, double, double)>();
+                List<(string 序号, string 数量, double 灯带长度, double 线长长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 标签显示长度)> 长度数据列表 = new List<(string, string, double, double, string, string, string, string, string)>();
 
                 // 直接从附件Excel文件中读取数据
                 string 附件文件路径 = 变量.附件excel地址;
@@ -865,10 +980,18 @@ namespace 包装计算
                             // 查找序号行
                             int 序号行号 = -1;
                             int 序号列号 = -1;
+                            int 第一个长度列号 = -1;
                             int 数量列号 = -1;
                             int 灯带长度列号 = -1;
                             int 线长01列号 = -1;
                             int 线长02列号 = -1;
+
+                            List<int> 标签码列号列表 = new List<int>();
+                            int 标签码1列号 = -1;
+                            int 标签码2列号 = -1;
+                            int 标签码3列号 = -1;
+                            int 标签码4列号 = -1;
+                            int 标签显示长度列号 = -1;
 
                             // 在前20行中查找标题行
                             for (int row = 1; row <= Math.Min(20, worksheet.Dimension.End.Row); row++)
@@ -928,7 +1051,80 @@ namespace 包装计算
                                     {
                                         线长02列号 = col;
                                     }
+                                    else if (cellValue.Contains("标签显示长度(英寸)") || cellValue.Contains("标签显示长度(英尺)") || cellValue.Contains("英尺长度") || cellValue.Contains("英寸长度"))
+                                    {
+                                        标签显示长度列号 = col;
+                                    }
                                 }
+
+                                // 获取工作表的实际列数
+                                int 最大列数 = worksheet.Dimension.End.Column;
+
+                                // 安全地遍历列
+                                for (int col = 1; col <= 最大列数; col++)
+                                {
+                                    try
+                                    {
+                                        string cellValue = worksheet.Cells[序号行号, col].Text?.Trim() ?? "";
+
+                                        if (cellValue.Contains("序号"))
+                                        {
+                                            序号列号 = col;
+                                        }
+                                        else if (cellValue.Contains("长度"))
+                                        {
+                                            第一个长度列号 = col;
+                                            break;
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        MessageBox.Show($"处理第{col}列时出错: {ex.Message}", "错误");
+                                        continue;
+                                    }
+                                }
+
+                                // 获取标签码列
+
+                                for (int col = 序号列号 + 1; col < 第一个长度列号; col++)
+                                {
+                                    if (col <= 最大列数)  // 确保不超出实际列范围
+                                    {
+                                        标签码列号列表.Add(col);
+                                    }
+                                }
+                                //MessageBox.Show($"找到{标签码列号列表.Count}个标签码列", "调试信息");
+
+                                // 直接使用标签码列号列表中的列号
+                                int[] 标签码列号 = new int[4];
+
+                                // 将找到的标签码列号复制到数组中
+                                for (int i = 0; i < Math.Min(标签码列号列表.Count, 4); i++)
+                                {
+                                    标签码列号[i] = 标签码列号列表[i];
+                                }
+
+                                // 未找到的标签码列号设为0
+                                for (int i = 标签码列号列表.Count; i < 4; i++)
+                                {
+                                    标签码列号[i] = 0;
+                                }
+
+                                // 将结果赋值给变量
+                                标签码1列号 = 标签码列号[0];
+                                标签码2列号 = 标签码列号[1];
+                                标签码3列号 = 标签码列号[2];
+                                标签码4列号 = 标签码列号[3];
+
+                                // 打印每个列号的值进行确认
+                                string 调试信息 = $"处理后的列号:\n" +
+                                                 $"标签码1列号: {标签码列号[0]}\n" +
+                                                 $"标签码2列号: {标签码列号[1]}\n" +
+                                                 $"标签码3列号: {标签码列号[2]}\n" +
+                                                 $"标签码4列号: {标签码列号[3]}";
+
+                                //MessageBox.Show(调试信息, "列号分配结果");
+                                //MessageBox.Show(标签码1列号.ToString(), 标签码2列号.ToString());
 
                                 // 处理数据行
                                 for (int row = 序号行号 + 1; row <= worksheet.Dimension.End.Row; row++)
@@ -944,9 +1140,17 @@ namespace 包装计算
                                     string 数量值 = 数量列号 != -1 ? worksheet.Cells[row, 数量列号].Text?.Trim() ?? "1" : "1";
                                     string 灯带长度值 = 灯带长度列号 != -1 ? worksheet.Cells[row, 灯带长度列号].Text?.Trim() ?? "0" : "0";
 
+                                    string 标签显示长度值 = 标签显示长度列号 != -1 ? worksheet.Cells[row, 标签显示长度列号].Text?.Trim() ?? "0" : "0";
+
                                     // 获取01端线长和02端线长
                                     string 线长01值 = 线长01列号 != -1 ? worksheet.Cells[row, 线长01列号].Text?.Trim() ?? "0" : "0";
                                     string 线长02值 = 线长02列号 != -1 ? worksheet.Cells[row, 线长02列号].Text?.Trim() ?? "0" : "0";
+
+                                    //获取标签码的值
+                                    string 标签码1 = 标签码1列号 > 0 ? worksheet.Cells[row, 标签码1列号].Text?.Trim() ?? "" : "";
+                                    string 标签码2 = 标签码2列号 > 0 ? worksheet.Cells[row, 标签码2列号].Text?.Trim() ?? "" : "";
+                                    string 标签码3 = 标签码3列号 > 0 ? worksheet.Cells[row, 标签码3列号].Text?.Trim() ?? "" : "";
+                                    string 标签码4 = 标签码4列号 > 0 ? worksheet.Cells[row, 标签码4列号].Text?.Trim() ?? "" : "";
 
                                     // 解析数值
                                     int 数量 = 1;
@@ -991,12 +1195,12 @@ namespace 包装计算
                                         // 为每条创建一个单独的记录
                                         for (int i = 0; i < 数量; i++)
                                         {
-                                            长度数据列表.Add((序号值 + "-" + (i + 1), "1", 分割后的灯带长度, 总线长));
+                                            长度数据列表.Add((序号值 + "-" + (i + 1), "1", 分割后的灯带长度, 总线长, 标签码1, 标签码2, 标签码3, 标签码4, 标签显示长度值));
                                         }
                                     }
                                     else
                                     {
-                                        长度数据列表.Add((序号值, 数量值, 灯带长度, 总线长));
+                                        长度数据列表.Add((序号值, 数量值, 灯带长度, 总线长, 标签码1, 标签码2, 标签码3, 标签码4, 标签显示长度值));
                                     }
                                 }
                             }
@@ -1037,14 +1241,19 @@ namespace 包装计算
 
                             if (长度数据列表.Count > 0)
                             {
-                                foreach (var (序号值, 数量值, 灯带长度, 线长长度) in 长度数据列表)
+                                foreach (var (序号值, 数量值, 灯带长度, 线长长度, 标签码1, 标签码2, 标签码3, 标签码4, 标签显示长度值) in 长度数据列表)
                                 {
                                     worksheet.Cells[row, 1].Value = 序号值;
                                     worksheet.Cells[row, 2].Value = 数量值;
                                     worksheet.Cells[row, 3].Value = 灯带长度;
                                     worksheet.Cells[row, 4].Value = 线长长度;
+                                    worksheet.Cells[row, 5].Value = 标签码1;
+                                    worksheet.Cells[row, 6].Value = 标签码2;
+                                    worksheet.Cells[row, 7].Value = 标签码3;
+                                    worksheet.Cells[row, 8].Value = 标签码4;
+                                    worksheet.Cells[row, 9].Value = 标签显示长度值;
 
-                                    using (var range = worksheet.Cells[row, 1, row, 4])
+                                    using (var range = worksheet.Cells[row, 1, row, 9])
                                     {
                                         range.Style.Border.Top.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
                                         range.Style.Border.Bottom.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
@@ -1059,7 +1268,7 @@ namespace 包装计算
                             else
                             {
                                 // 如果没有数据，添加一个空行
-                                using (var range = worksheet.Cells[row, 1, row, 4])
+                                using (var range = worksheet.Cells[row, 1, row, 9])
                                 {
                                     range.Style.Border.Top.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
                                     range.Style.Border.Bottom.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
@@ -1083,6 +1292,7 @@ namespace 包装计算
             }
         }
 
+        //处理同样型号，同样出线方式的备注订单
         private void 混合处理()
         {
             try
@@ -1107,7 +1317,7 @@ namespace 包装计算
                 // 用于存储已处理的型号
                 Dictionary<string, List<string>> 型号文件映射 = new Dictionary<string, List<string>>();
 
-                // 首先遍历备注文件，找出相同型号的文件
+                // 首先遍历备注文件，找出相同型号的文件，如果有客户型号按照相同客户型号合并，如果没有客户型号，按照原本型号来
                 foreach (var 文件路径 in 备注文件列表)
                 {
                     string 文件名 = Path.GetFileNameWithoutExtension(文件路径);
@@ -1118,25 +1328,52 @@ namespace 包装计算
                     if (型号匹配.Success)
                     {
                         基础型号 = 型号匹配.Groups[1].Value;
-                        if (!型号文件映射.ContainsKey(基础型号))
+
+                        // 读取客户型号（假设在第6行第2列，如有不同请调整）
+                        string 客户型号 = "";
+                        using (ExcelPackage package = new ExcelPackage(new FileInfo(文件路径)))
                         {
-                            型号文件映射[基础型号] = new List<string>();
+                            var worksheet = package.Workbook.Worksheets[0];
+                            客户型号 = worksheet.Cells[6, 2].Text?.Trim() ?? "";
                         }
-                        型号文件映射[基础型号].Add(文件路径);
+
+                        // 分组key - 使用型号和客户型号组合，但不修改最终输出的型号名称
+                        string 分组key = string.IsNullOrEmpty(客户型号) ? 基础型号 : $"{基础型号}|{客户型号}";
+
+                        if (!型号文件映射.ContainsKey(分组key))
+                        {
+                            型号文件映射[分组key] = new List<string>();
+                        }
+                        型号文件映射[分组key].Add(文件路径);
                     }
                 }
 
                 // 处理相同型号的文件
                 foreach (var kvp in 型号文件映射)
                 {
-                    string 基础型号 = kvp.Key;
+                    string 分组key = kvp.Key;
                     var 相关文件列表 = kvp.Value;
+
+                    // 从分组key中提取基础型号和客户型号
+                    string 基础型号;
+                    string 客户型号 = "";
+
+                    if (分组key.Contains("|"))
+                    {
+                        var parts = 分组key.Split('|');
+                        基础型号 = parts[0];
+                        客户型号 = parts[1];
+                    }
+                    else
+                    {
+                        基础型号 = 分组key;
+                    }
 
                     if (相关文件列表.Count > 1)
                     {
                         //MessageBox.Show($"发现型号 {基础型号} 有 {相关文件列表.Count} 个文件需要整合", "调试信息");
 
-                        // 创建新的整合文件
+                        // 创建新的整合文件 - 只使用基础型号，不包含客户型号
                         string 整合文件名 = $"{基础型号}-整合.xlsx";
                         string 整合文件路径 = Path.Combine(处理好订单文件夹路径, 整合文件名);
 
@@ -1246,6 +1483,8 @@ namespace 包装计算
                             newWorksheet.Cells[4, 2].Value = 销售数量表达式.ToString(); // 使用表达式而不是计算结果
                             newWorksheet.Cells[5, 1].Value = "出线方式";
                             newWorksheet.Cells[5, 2].Value = 出线方式;
+                            newWorksheet.Cells[6, 1].Value = "客户型号"; // 添加客户型号行
+                            newWorksheet.Cells[6, 2].Value = 客户型号;  // 保持客户型号不变
 
                             // 写入表头
                             newWorksheet.Cells[7, 1].Value = "序号";
@@ -1314,7 +1553,7 @@ namespace 包装计算
             }
         }
 
-        private void 查找合适包装_0(List<(string 序号, double 灯带长度, double 线材长度)> 长度列表, string 型号, string 出线方式)
+        private void 查找合适包装_0(List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号, string 出线方式)
         {
             try
             {
@@ -1331,6 +1570,20 @@ namespace 包装计算
                     }
                 }
 
+                // 判断出线方式是否为空
+                bool isNoWireType = string.IsNullOrWhiteSpace(出线方式);
+                string[] 出线方式数组;
+                if (isNoWireType)
+                {
+                    出线方式数组 = new[] { "直发" };
+                }
+                else
+                {
+                    出线方式数组 = 出线方式.Split(new[] { ',', '，', ';', '；' }, StringSplitOptions.RemoveEmptyEntries)
+                                            .Select(s => s.Trim())
+                                            .ToArray();
+                }
+
                 // 第一步：找到支持该型号和出线方式的所有包装
                 List<包装数据> 匹配包装列表 = new List<包装数据>();
                 foreach (var kvp in 包装数据字典)
@@ -1338,17 +1591,65 @@ namespace 包装计算
                     var 包装 = kvp.Value;
                     foreach (var 产品信息 in 包装.支持产品型号列表)
                     {
-                        if (产品信息.产品型号 == 型号 && 产品信息.装箱产品型号规格.Contains(出线方式))
+                        if (产品信息.产品型号 == 型号)
                         {
-                            匹配包装列表.Add(包装);
-                            break;
+                            if (isNoWireType)
+                            {
+                                // 没有出线方式时，只有装箱产品型号规格为空或为“直发”才算匹配
+                                if (string.IsNullOrWhiteSpace(产品信息.装箱产品型号规格) || 产品信息.装箱产品型号规格.Contains("直发"))
+                                {
+                                    匹配包装列表.Add(包装);
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                // 原有逻辑
+                                bool 至少一个匹配 = false;
+                                foreach (var 单个出线方式 in 出线方式数组)
+                                {
+                                    if (产品信息.装箱产品型号规格.Contains(单个出线方式))
+                                    {
+                                        至少一个匹配 = true;
+                                        break;
+                                    }
+                                }
+                                if (至少一个匹配)
+                                {
+                                    匹配包装列表.Add(包装);
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
 
                 if (匹配包装列表.Count == 0)
                 {
-                    MessageBox.Show($"未找到支持型号 {型号} 且出线方式为 {出线方式} 的包装", "未找到匹配包装");
+                    // 提供更详细的错误信息
+                    StringBuilder errorMessage = new StringBuilder();
+                    errorMessage.AppendLine($"未找到支持型号 {型号} 且出线方式为以下任一项的包装:");
+
+                    foreach (var 单个出线方式 in 出线方式数组)
+                    {
+                        errorMessage.AppendLine($"- {单个出线方式}");
+                    }
+
+                    // 显示所有可用的包装信息
+                    errorMessage.AppendLine("\n可用的包装信息:");
+                    foreach (var kvp in 包装数据字典)
+                    {
+                        var 包装 = kvp.Value;
+                        foreach (var 产品信息 in 包装.支持产品型号列表)
+                        {
+                            if (产品信息.产品型号 == 型号)
+                            {
+                                errorMessage.AppendLine($"- 包装名称: {包装.包装名称}, 支持规格: {产品信息.装箱产品型号规格}");
+                            }
+                        }
+                    }
+
+                    MessageBox.Show(errorMessage.ToString(), "未找到匹配包装");
                     return;
                 }
 
@@ -1410,32 +1711,47 @@ namespace 包装计算
                 保存日志(sb.ToString(), "匹配到的包装列表", Path.GetFileName(当前处理文件名));
 
                 // 执行两种方案
-                
+
                 var 方案一结果 = 执行方案一(匹配包装列表, 长度列表, 型号);
                 var 方案二结果 = 执行方案二(匹配包装列表, 长度列表, 型号);
-
-                // 尝试执行方案二，但如果找不到470包装就跳过
-                //包装方案 方案二结果 = null;
-                //try
-                //{
-                //    方案二结果 = 执行方案二(匹配包装列表, 长度列表, 型号);
-                //}
-                //catch (Exception ex)
-                //{
-                //    if (ex.Message.Contains("未找到470包装规格"))
-                //    {
-                //        // 记录日志但不显示错误消息
-                //        保存日志("方案二执行时未找到470包装规格，跳过方案二", "执行方案日志", Path.GetFileName(当前处理文件名));
-                //    }
-                //    else
-                //    {
-                //        throw; // 重新抛出其他类型的异常
-                //    }
-                //}
                 var 节约方案结果 = 执行节约方案(匹配包装列表, 长度列表, 型号);
+                //var RU客户方案结果=执行RU客户方案(匹配包装列表, 长度列表, 型号);
+                //var Luminii客户方案结果=执行Luminii客户方案(匹配包装列表, 长度列表, 型号);
 
-                // 比较两种方案并显示结果
-                显示方案比较结果_2(方案一结果, 方案二结果, 节约方案结果);
+                //MessageBox.Show("当前选择的算法是：" + 当前选择算法, "算法选择结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                //显示Luminii客户方案结果(匹配包装列表, 长度列表, 型号);
+                if (当前选择算法 == "常规三选一最优方案")
+                {
+                    显示方案比较结果_2(方案一结果, 方案二结果, 节约方案结果);
+                }
+                else if (当前选择算法 == "RU客户方案" || 变量.客户代码.Contains("12141") || 变量.客户代码.Contains("15065"))
+                {
+                    显示RU客户方案结果(匹配包装列表, 长度列表, 型号);
+                }
+                else if (当前选择算法 == "Luminii-常规")
+                {
+                    显示Luminii客户方案结果(匹配包装列表, 长度列表, 型号);
+                }
+                else if (当前选择算法 == "Luinii-不同标签码2不能混装")
+                {
+                    显示Luminii不同标签码2方案结果(匹配包装列表, 长度列表, 型号);
+                }
+                else if (当前选择算法 == "不同序号不可混装")
+                {
+                    显示不同序号不可混装方案结果(匹配包装列表, 长度列表, 型号);
+                }
+                else if (当前选择算法 == "不同标签码1不能混装")
+                {
+                    显示不同标签码1不能混装方案结果(匹配包装列表, 长度列表, 型号);
+                }
+                else if (当前选择算法 == "不同标签码2不能混装")
+                {
+                    显示不同标签码2不能混装方案结果(匹配包装列表, 长度列表, 型号);
+                }
+                else if (当前选择算法 == "不同标签码1不能混装(且外箱不能混装)")
+                {
+                    显示不同标签码1不能混装方案结果(匹配包装列表, 长度列表, 型号);
+                }
             }
             catch (Exception ex)
             {
@@ -1444,11 +1760,21 @@ namespace 包装计算
         }
 
         //先选出单条包装的灯带，在把剩余的灯带进行多条包装选择。
-        private (List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度)> 包含灯带)> 多条包装列表,
-          List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度)> 单条包装列表)
- 执行方案一(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度)> 长度列表, string 型号)
+        private (List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表,
+         List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表)
+执行方案一(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
         {
-            var 单条包装列表 = 匹配包装列表.Where(p => p.包装类型.Contains("单条"))
+            // 添加辅助方法：判断是否需要计算线长
+            bool 需要计算线长(List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 灯带列表)
+            {
+                if (灯带列表.Count > 4) return true;  // 超过4条需要计算
+                return 灯带列表.Any(x => x.线材长度 > 5.0);  // 有任何一条超过5米需要计算
+            }
+
+            // 排除Luminii包装
+            var 非Luminii包装列表 = 匹配包装列表.Where(p => !p.包装名称.Contains("Luminii")).ToList();
+
+            var 单条包装列表 = 非Luminii包装列表.Where(p => p.包装类型.Contains("单条"))
                 .OrderBy(p =>
                 {
                     if (p.包装名称.Contains("330")) return 1;
@@ -1458,24 +1784,32 @@ namespace 包装计算
                 })
                 .ToList();
 
-            List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度)> 单条包装列表记录
-                = new List<(string, string, string, double, double)>();
+            List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表记录
+                = new List<(string, string, string, double, double, string, string, string, string, string, string)>();
             List<string> 需要多条包装的灯带序号 = new List<string>();
 
             // 单条包装匹配逻辑
             for (int i = 0; i < 长度列表.Count; i++)
             {
-                var (序号, 灯带长度, 线材长度) = 长度列表[i];
+                var (序号, 灯带长度, 线材长度, 标签码1, 标签码2, 标签码3, 标签码4, 客户型号, 标签显示长度) = 长度列表[i];
                 bool 找到单条包装 = false;
 
                 foreach (var 包装 in 单条包装列表)
                 {
                     var 产品信息 = 包装.支持产品型号列表.FirstOrDefault(p => p.产品型号 == 型号);
+                    // 创建单条灯带的列表用于检查线长计算条件
+                    var 单条灯带列表 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>
+            {
+                (序号, 灯带长度, 线材长度, 标签码1, 标签码2, 标签码3, 标签码4,客户型号,标签显示长度)
+            };
+
+                    bool 忽略线长限制 = !需要计算线长(单条灯带列表);
+
                     if (灯带长度 <= 产品信息.灯带最大长度 &&
                         灯带长度 >= 产品信息.最低阈值 &&
-                        线材长度 <= 产品信息.线材最大长度)
+                        (忽略线长限制 || 线材长度 <= 产品信息.线材最大长度))
                     {
-                        单条包装列表记录.Add((包装.包装名称, 包装.物料码, 序号, 灯带长度, 线材长度));
+                        单条包装列表记录.Add((包装.包装名称, 包装.物料码, 序号, 灯带长度, 线材长度, 标签码1, 标签码2, 标签码3, 标签码4, 客户型号, 标签显示长度));
                         找到单条包装 = true;
                         break;
                     }
@@ -1487,8 +1821,8 @@ namespace 包装计算
                 }
             }
 
-            List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度)> 包含灯带)> 使用的包装列表
-                = new List<(string, string, List<(string, double, double)>)>();
+            List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 使用的包装列表
+                = new List<(string, string, List<(string, double, double, string, string, string, string, string, string)>)>();
 
             if (需要多条包装的灯带序号.Count > 0)
             {
@@ -1496,16 +1830,16 @@ namespace 包装计算
                     .Select(序号 =>
                     {
                         var 原始数据 = 长度列表.FirstOrDefault(x => x.序号 == 序号);
-                        return (序号: 原始数据.序号, 灯带长度: 原始数据.灯带长度, 线材长度: 原始数据.线材长度);
+                        return (序号: 原始数据.序号, 灯带长度: 原始数据.灯带长度, 线材长度: 原始数据.线材长度, 标签码1: 原始数据.标签码1, 标签码2: 原始数据.标签码2, 标签码3: 原始数据.标签码3, 标签码4: 原始数据.标签码4, 客户型号: 原始数据.客户型号, 标签显示长度: 原始数据.标签显示长度);
                     })
                     .ToList();
 
                 // 使用比例算法进行分组
-                List<List<(string 序号, double 灯带长度, double 线材长度)>> 分组结果 = new List<List<(string, double, double)>>();
-                var 当前组 = new List<(string 序号, double 灯带长度, double 线材长度)>();
+                List<List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>> 分组结果 = new List<List<(string, double, double, string, string, string, string, string, string)>>();
+                var 当前组 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>();
                 double current灯带米数 = 0;
                 double current线材长度 = 0;
-                double 权重值 = 1;
+                double 权重值 = uiTextBox_权重值.Text.ToDouble();
 
                 foreach (var 灯带 in 待处理灯带)
                 {
@@ -1513,17 +1847,12 @@ namespace 包装计算
                     double 预计累计灯带米数 = current灯带米数 + 灯带.灯带长度;
                     double 预计累计线材长度 = current线材长度 + 灯带.线材长度;
 
-                    // 获取当前使用的包装规格（假设先用470包装）
-                    //var 当前包装 = 匹配包装列表.First(p => p.包装名称.Contains("470") &&
-                    //    (p.包装类型.Contains("多条") || p.包装类型.Contains("2条") || p.包装类型.Contains("3条")));
-                    //var 产品信息 = 当前包装.支持产品型号列表.First(p => p.产品型号 == 型号);
-
                     var 空结果 = (
-        多条包装列表: new List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度)> 包含灯带)>(),
-        单条包装列表: new List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度)>()
-    );
+                        多条包装列表: new List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)>(),
+                        单条包装列表: new List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>()
+                    );
 
-                    var 匹配包装 = 匹配包装列表.Where(p => p.包装名称.Contains("470") &&(p.包装类型.Contains("多条") || p.包装类型.Contains("2条") || p.包装类型.Contains("3条"))).ToList();
+                    var 匹配包装 = 非Luminii包装列表.Where(p => p.包装名称.Contains("470") && (p.包装类型.Contains("多条") || p.包装类型.Contains("2条") || p.包装类型.Contains("3条"))).ToList();
 
                     if (!匹配包装.Any())
                     {
@@ -1541,9 +1870,13 @@ namespace 包装计算
                     }
 
                     var 产品信息 = 匹配产品[0];
-
                     double 最大灯带米数 = 产品信息.灯带最大长度;
                     double 最大线材长度 = 产品信息.线材最大长度;
+
+                    // 检查是否需要计算线长限制
+                    var 预计组 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>(当前组);
+                    预计组.Add(灯带);
+                    bool 忽略线长限制 = !需要计算线长(预计组);
 
                     // 计算权重系数
                     double 累计灯带权重系数 = 预计累计灯带米数 / 最大灯带米数;
@@ -1555,13 +1888,13 @@ namespace 包装计算
 
                     // 检查是否超出限制
                     bool 超出灯带限制 = 预计累计灯带米数 > 调整后最大灯带米数;
-                    bool 超出线材限制 = 预计累计线材长度 > 调整后最大线材长度;
+                    bool 超出线材限制 = !忽略线长限制 && 预计累计线材长度 > 调整后最大线材长度;
 
                     if (超出灯带限制 || 超出线材限制)
                     {
                         if (当前组.Count > 0)
                         {
-                            分组结果.Add(new List<(string, double, double)>(当前组));
+                            分组结果.Add(new List<(string, double, double, string, string, string, string, string, string)>(当前组));
                             当前组.Clear();
                         }
                         current灯带米数 = 0;
@@ -1575,7 +1908,7 @@ namespace 包装计算
 
                 if (当前组.Count > 0)
                 {
-                    分组结果.Add(new List<(string, double, double)>(当前组));
+                    分组结果.Add(new List<(string, double, double, string, string, string, string, string, string)>(当前组));
                 }
 
                 // 为每个分组选择合适的包装
@@ -1583,9 +1916,10 @@ namespace 包装计算
                 {
                     double 分组总灯带长度 = 分组.Sum(x => x.灯带长度);
                     double 分组总线材长度 = 分组.Sum(x => x.线材长度);
+                    bool 忽略线长限制 = !需要计算线长(分组);
 
                     // 先尝试使用470包装
-                    var 四七零包装列表 = 匹配包装列表.Where(p => p.包装名称.Contains("470") &&
+                    var 四七零包装列表 = 非Luminii包装列表.Where(p => p.包装名称.Contains("470") &&
                         (p.包装类型.Contains("多条") || p.包装类型.Contains("2条") || p.包装类型.Contains("3条")))
                         .ToList();
 
@@ -1594,7 +1928,8 @@ namespace 包装计算
                         var 四七零包装 = 四七零包装列表.FirstOrDefault();
                         var 产品信息 = 四七零包装.支持产品型号列表.FirstOrDefault(p => p.产品型号 == 型号);
 
-                        if (分组总灯带长度 <= 产品信息.灯带最大长度 && 分组总线材长度 <= 产品信息.线材最大长度)
+                        if (分组总灯带长度 <= 产品信息.灯带最大长度 &&
+                            (忽略线长限制 || 分组总线材长度 <= 产品信息.线材最大长度))
                         {
                             使用的包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 分组));
                             continue;
@@ -1602,7 +1937,7 @@ namespace 包装计算
                     }
 
                     // 如果470包装不合适，尝试600包装
-                    var 六百包装列表 = 匹配包装列表.Where(p => p.包装名称.Contains("600") &&
+                    var 六百包装列表 = 非Luminii包装列表.Where(p => p.包装名称.Contains("600") &&
                         (p.包装类型.Contains("多条") || p.包装类型.Contains("2条") || p.包装类型.Contains("3条")))
                         .ToList();
 
@@ -1611,7 +1946,8 @@ namespace 包装计算
                         var 六百包装 = 六百包装列表.FirstOrDefault();
                         var 产品信息 = 六百包装.支持产品型号列表.FirstOrDefault(p => p.产品型号 == 型号);
 
-                        if (分组总灯带长度 <= 产品信息.灯带最大长度 && 分组总线材长度 <= 产品信息.线材最大长度)
+                        if (分组总灯带长度 <= 产品信息.灯带最大长度 &&
+                            (忽略线长限制 || 分组总线材长度 <= 产品信息.线材最大长度))
                         {
                             使用的包装列表.Add((六百包装.包装名称, 六百包装.物料码, 分组));
                         }
@@ -1626,213 +1962,179 @@ namespace 包装计算
             return (使用的包装列表, 单条包装列表记录);
         }
 
-        //先用470包装作为基准，进行多盒判断区分
-        private (List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度)> 包含灯带)> 多条包装列表,
-         List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度)> 单条包装列表)
-执行方案二(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度)> 长度列表, string 型号)
+        private (List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表,
+         List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表)
+执行方案二(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
         {
-            List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度)> 包含灯带)> 使用的包装列表
-                = new List<(string, string, List<(string, double, double)>)>();
+            // 排除Luminii包装
+            var 非Luminii包装列表 = 匹配包装列表.Where(p => !p.包装名称.Contains("Luminii")).ToList();
 
-            List<(string 序号, double 灯带长度, double 线材长度)> 待处理灯带 = 长度列表.ToList();
+            List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 使用的包装列表
+                = new List<(string, string, List<(string, double, double, string, string, string, string, string, string)>)>();
 
-            // 使用比例算法进行分组
-            List<List<(string 序号, double 灯带长度, double 线材长度)>> 分组结果 = new List<List<(string, double, double)>>();
-            var 当前组 = new List<(string 序号, double 灯带长度, double 线材长度)>();
-            double current灯带米数 = 0;
-            double current线材长度 = 0;
-            double 权重值 = 1;
+            List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表记录
+                = new List<(string, string, string, double, double, string, string, string, string, string, string)>();
 
-            foreach (var 灯带 in 待处理灯带)
+            // 复制一份长度列表，用于处理
+            List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 待处理灯带 = new List<(string, double, double, string, string, string, string, string, string)>(长度列表);
+
+            // 获取600和470的多条包装，从非Luminii包装列表中获取
+            var 六百包装 = 非Luminii包装列表.FirstOrDefault(p => p.包装名称?.Contains("600") == true &&
+                (p.包装类型?.Contains("多条") == true || p.包装类型?.Contains("2条") == true || p.包装类型?.Contains("3条") == true));
+
+            var 四七零包装 = 非Luminii包装列表.FirstOrDefault(p => p.包装名称?.Contains("470") == true &&
+                (p.包装类型?.Contains("多条") == true || p.包装类型?.Contains("2条") == true || p.包装类型?.Contains("3条") == true));
+
+            double 权重值 = uiTextBox_权重值.Text.ToDouble();
+
+            // 处理多条包装
+            while (待处理灯带.Count >= 2)
             {
-                // 计算预计累计值
-                double 预计累计灯带米数 = current灯带米数 + 灯带.灯带长度;
-                double 预计累计线材长度 = current线材长度 + 灯带.线材长度;
+                // 尝试找出最多能放入一个包装的灯带
+                List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 当前组 = new List<(string, double, double, string, string, string, string, string, string)>();
+                double 当前组灯带总长 = 0;
+                double 当前组线材总长 = 0;
 
-                // 获取当前可使用的包装规格（假设先用470包装）
-                var 当前包装 = 匹配包装列表.FirstOrDefault(p => p.包装名称?.Contains("470") == true &&
-                    (p.包装类型?.Contains("多条") == true ||
-                     p.包装类型?.Contains("2条") == true ||
-                     p.包装类型?.Contains("3条") == true));
-
-                if (当前包装 == null)
+                for (int i = 0; i < 待处理灯带.Count; i++)
                 {
-                    //MessageBox.Show("方案二未找到470包装规格", "提示");
-                    continue; // 或 return，取决于你的业务逻辑
-                }
+                    var 当前灯带 = 待处理灯带[i];
+                    double 预计累计灯带米数 = 当前组灯带总长 + 当前灯带.灯带长度;
+                    double 预计累计线材长度 = 当前组线材总长 + 当前灯带.线材长度;
 
-                var 产品信息 = 当前包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
-                if (产品信息 == null)
-                {
-                    //MessageBox.Show($"未找到型号 {型号} 的产品信息", "提示");
-                    continue; // 或 return，取决于你的业务逻辑
-                }
+                    // 创建临时组用于检查
+                    var 临时组 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>(当前组);
+                    临时组.Add(当前灯带);
 
-                double 最大灯带米数 = 产品信息.灯带最大长度;
-                double 最大线材长度 = 产品信息.线材最大长度;
+                    bool 可以用600 = 六百包装 != null && 检查包装是否可用(六百包装, 型号, 预计累计灯带米数, 预计累计线材长度, 权重值, 临时组);
+                    bool 可以用470 = 四七零包装 != null && 检查包装是否可用(四七零包装, 型号, 预计累计灯带米数, 预计累计线材长度, 权重值, 临时组);
 
-
-                // 计算权重系数
-                double 累计灯带权重系数 = 预计累计灯带米数 / 最大灯带米数;
-                double 累计线材权重系数 = 预计累计线材长度 / 最大线材长度;
-
-                // 调整最大限制
-                double 调整后最大线材长度 = 最大线材长度 * (1 - 累计灯带权重系数 * 权重值);
-                double 调整后最大灯带米数 = 最大灯带米数 * (1 - 累计线材权重系数 * 权重值);
-
-                // 检查是否超出限制
-                bool 超出灯带限制 = 预计累计灯带米数 > 调整后最大灯带米数;
-                bool 超出线材限制 = 预计累计线材长度 > 调整后最大线材长度;
-
-                if (超出灯带限制 || 超出线材限制)
-                {
-                    if (当前组.Count > 0)
+                    if (可以用600)
                     {
-                        分组结果.Add(new List<(string, double, double)>(当前组));
-                        当前组.Clear();
+                        当前组.Add(当前灯带);
+                        当前组灯带总长 = 预计累计灯带米数;
+                        当前组线材总长 = 预计累计线材长度;
                     }
-                    current灯带米数 = 0;
-                    current线材长度 = 0;
+                    else
+                    {
+                        break;
+                    }
                 }
 
-                当前组.Add(灯带);
-                current灯带米数 += 灯带.灯带长度;
-                current线材长度 += 灯带.线材长度;
-            }
-
-            if (当前组.Count > 0)
-            {
-                分组结果.Add(new List<(string, double, double)>(当前组));
-            }
-
-            List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度)> 单条包装列表记录
-                = new List<(string, string, string, double, double)>();
-
-            // 为每个分组选择合适的包装
-            foreach (var 分组 in 分组结果)
-            {
-                if (分组.Count == 1)
+                // 处理当前组的逻辑
+                if (当前组.Count >= 2)
                 {
-                    // 单条包装处理
-                    var 灯带 = 分组[0];
-                    var 单条包装列表 = 匹配包装列表.Where(p => p.包装类型.Contains("单条"))
-                        .OrderBy(p =>
-                        {
-                            if (p.包装名称.Contains("330")) return 1;
-                            if (p.包装名称.Contains("470")) return 2;
-                            if (p.包装名称.Contains("600")) return 3;
-                            return 4;
-                        })
-                        .ToList();
+                    bool 可以用470 = 四七零包装 != null && 检查包装是否可用(四七零包装, 型号, 当前组灯带总长, 当前组线材总长, 权重值, 当前组);
 
-                    bool 找到单条包装 = false;
-                    foreach (var 包装 in 单条包装列表)
+                    if (可以用470)
                     {
-                        var 产品信息 = 包装.支持产品型号列表.FirstOrDefault(p => p.产品型号 == 型号);
-                        if (灯带.灯带长度 <= 产品信息.灯带最大长度 &&
-                            灯带.灯带长度 >= 产品信息.最低阈值 &&
-                            灯带.线材长度 <= 产品信息.线材最大长度)
-                        {
-                            单条包装列表记录.Add((包装.包装名称, 包装.物料码, 灯带.序号, 灯带.灯带长度, 灯带.线材长度));
-                            找到单条包装 = true;
-                            break;
-                        }
+                        使用的包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 当前组));
+                    }
+                    else
+                    {
+                        使用的包装列表.Add((六百包装.包装名称, 六百包装.物料码, 当前组));
                     }
 
-                    if (!找到单条包装)
+                    foreach (var 灯带 in 当前组)
                     {
-                        // 如果找不到合适的单条包装，使用多条包装
-                        处理多条包装(分组, 匹配包装列表, 型号, 使用的包装列表);
+                        待处理灯带.Remove(灯带);
                     }
                 }
                 else
                 {
-                    // 多条包装处理
-                    处理多条包装(分组, 匹配包装列表, 型号, 使用的包装列表);
+                    break;
+                }
+            }
+
+            // 处理剩余的单条灯带
+            foreach (var 灯带 in 待处理灯带.ToList())  // 使用ToList()创建副本以避免修改集合时的问题
+            {
+                var 单条灯带列表 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> { 灯带 };
+                bool 忽略线长限制 = !需要计算线长(单条灯带列表);
+
+                var 单条包装列表 = 非Luminii包装列表.Where(p => p.包装类型?.Contains("单条") == true)
+                    .OrderBy(p =>
+                    {
+                        if (p.包装名称?.Contains("330") == true) return 1;
+                        if (p.包装名称?.Contains("470") == true) return 2;
+                        if (p.包装名称?.Contains("600") == true) return 3;
+                        return 4;
+                    })
+                    .ToList();
+
+                bool 找到单条包装 = false;
+
+                foreach (var 包装 in 单条包装列表)
+                {
+                    var 产品信息 = 包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                    if (产品信息 != null &&
+                        灯带.灯带长度 <= 产品信息.灯带最大长度 &&
+                        灯带.灯带长度 >= 产品信息.最低阈值 &&
+                        (忽略线长限制 || 灯带.线材长度 <= 产品信息.线材最大长度))
+                    {
+                        单条包装列表记录.Add((包装.包装名称, 包装.物料码, 灯带.序号, 灯带.灯带长度, 灯带.线材长度, 灯带.标签码1, 灯带.标签码2, 灯带.标签码3, 灯带.标签码4, 灯带.客户型号, 灯带.标签显示长度));
+                        找到单条包装 = true;
+                        break;
+                    }
+                }
+
+                // 如果找不到合适的单条包装，尝试使用多条包装
+                if (!找到单条包装)
+                {
+                    bool 可以用470单条 = 四七零包装 != null && 检查包装是否可用(四七零包装, 型号, 灯带.灯带长度, 灯带.线材长度, 权重值, 单条灯带列表);
+
+                    if (可以用470单条)
+                    {
+                        使用的包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 单条灯带列表));
+                    }
+                    else if (六百包装 != null)
+                    {
+                        bool 可以用600单条 = 检查包装是否可用(六百包装, 型号, 灯带.灯带长度, 灯带.线材长度, 权重值, 单条灯带列表);
+
+                        if (可以用600单条)
+                        {
+                            使用的包装列表.Add((六百包装.包装名称, 六百包装.物料码, 单条灯带列表));
+                        }
+                        else
+                        {
+                            throw new Exception($"无法找到合适的包装方案处理灯带 {灯带.序号}");
+                        }
+                    }
                 }
             }
 
             return (使用的包装列表, 单条包装列表记录);
         }
 
-        private void 处理多条包装(
-            List<(string 序号, double 灯带长度, double 线材长度)> 分组,
-            List<包装数据> 匹配包装列表,
-            string 型号,
-            List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度)> 包含灯带)> 使用的包装列表)
-        {
-            double 分组总灯带长度 = 分组.Sum(x => x.灯带长度);
-            double 分组总线材长度 = 分组.Sum(x => x.线材长度);
-
-            // 先尝试使用470包装
-            var 四七零包装列表 = 匹配包装列表.Where(p => p.包装名称.Contains("470") &&
-                (p.包装类型.Contains("多条") || p.包装类型.Contains("2条") || p.包装类型.Contains("3条")))
-                .ToList();
-
-            if (四七零包装列表.Any())
-            {
-                var 四七零包装 = 四七零包装列表.FirstOrDefault();
-                var 产品信息 = 四七零包装.支持产品型号列表.FirstOrDefault(p => p.产品型号 == 型号);
-
-                if (分组总灯带长度 <= 产品信息.灯带最大长度 && 分组总线材长度 <= 产品信息.线材最大长度)
-                {
-                    使用的包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 分组));
-                    return;
-                }
-            }
-
-            // 如果470包装不合适，尝试600包装
-            var 六百包装列表 = 匹配包装列表.Where(p => p.包装名称.Contains("600") &&
-                (p.包装类型.Contains("多条") || p.包装类型.Contains("2条") || p.包装类型.Contains("3条")))
-                .ToList();
-
-            if (六百包装列表.Any())
-            {
-                var 六百包装 = 六百包装列表.FirstOrDefault();
-                var 产品信息 = 六百包装.支持产品型号列表.FirstOrDefault(p => p.产品型号 == 型号);
-
-                if (分组总灯带长度 <= 产品信息.灯带最大长度 && 分组总线材长度 <= 产品信息.线材最大长度)
-                {
-                    使用的包装列表.Add((六百包装.包装名称, 六百包装.物料码, 分组));
-                }
-                else
-                {
-                    throw new Exception("无法找到合适的包装方案处理当前分组");
-                }
-            }
-        }
-
         //有权重系数
-        private (List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度)> 包含灯带)> 多条包装列表,
-         List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度)> 单条包装列表)
-执行节约方案(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度)> 长度列表, string 型号)
+        private (List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表,
+                 List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表)
+        执行节约方案(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
         {
-            List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度)> 包含灯带)> 使用的包装列表
-                = new List<(string, string, List<(string, double, double)>)>();
+            List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 使用的包装列表
+                = new List<(string, string, List<(string, double, double, string, string, string, string, string, string)>)>();
 
-            List<(string 序号, double 灯带长度, double 线材长度)> 待处理灯带 = 长度列表.ToList(); // 保持原始顺序
+            List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 待处理灯带 = 长度列表.ToList(); // 保持原始顺序
 
-            List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度)> 单条包装列表记录
-                = new List<(string, string, string, double, double)>();
+            List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表记录
+                = new List<(string, string, string, double, double, string, string, string, string, string, string)>();
 
-            double 权重值 = 1.0; // 可以调整这个值来改变限制的严格程度
+            double 权重值 = uiTextBox_权重值.Text.ToDouble(); // 可以调整这个值来改变限制的严格程度
+
+            // 首先排除Luminii包装
+            var 非Luminii包装列表 = 匹配包装列表.Where(p => !p.包装名称.Contains("Luminii")).ToList();
+
+            // 获取470和600的多条包装，从非Luminii包装列表中获取
+            var 四七零包装 = 非Luminii包装列表.FirstOrDefault(p => p.包装名称?.Contains("470") == true &&
+                (p.包装类型?.Contains("多条") == true || p.包装类型?.Contains("2条") == true || p.包装类型?.Contains("3条") == true));
+
+            var 六百包装 = 非Luminii包装列表.FirstOrDefault(p => p.包装名称?.Contains("600") == true &&
+                (p.包装类型?.Contains("多条") == true || p.包装类型?.Contains("2条") == true || p.包装类型?.Contains("3条") == true));
 
             while (待处理灯带.Any())
             {
-                var 当前组 = new List<(string 序号, double 灯带长度, double 线材长度)>();
+                var 当前组 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>();
                 double current灯带米数 = 0;
                 double current线材长度 = 0;
-
-                // 获取可用的包装列表（按容量从大到小排序）
-                var 可用包装列表 = 匹配包装列表
-                    .Where(p => p.包装类型.Contains("多条") || p.包装类型.Contains("2条") || p.包装类型.Contains("3条"))
-                    .OrderByDescending(p => p.支持产品型号列表.FirstOrDefault(x => x.产品型号 == 型号).灯带最大长度)
-                    .ToList();
-
-                var 当前包装 = 可用包装列表.FirstOrDefault();
-                var 产品信息 = 当前包装.支持产品型号列表.FirstOrDefault(p => p.产品型号 == 型号);
-                double 最大灯带米数 = 产品信息.灯带最大长度;
-                double 最大线材长度 = 产品信息.线材最大长度;
 
                 // 处理第一条灯带
                 var 第一个灯带 = 待处理灯带[0];
@@ -1848,20 +2150,26 @@ namespace 包装计算
                     double 预计累计灯带米数 = current灯带米数 + 下一个灯带.灯带长度;
                     double 预计累计线材长度 = current线材长度 + 下一个灯带.线材长度;
 
-                    // 计算权重系数
-                    double 累计灯带权重系数 = 预计累计灯带米数 / 最大灯带米数;
-                    double 累计线材权重系数 = 预计累计线材长度 / 最大线材长度;
+                    // 检查470包装是否可用
+                    bool 可以用470 = false;
+                    if (四七零包装 != null)
+                    {
+                        var 临时组 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>(当前组);
+                        临时组.Add(下一个灯带);
+                        可以用470 = 检查包装是否可用(四七零包装, 型号, 预计累计灯带米数, 预计累计线材长度, 权重值, 临时组);
+                    }
 
-                    // 调整最大限制（考虑两者的相互影响）
-                    double 调整后最大线材长度 = 最大线材长度 * (1 - 累计灯带权重系数 * 权重值);
-                    double 调整后最大灯带米数 = 最大灯带米数 * (1 - 累计线材权重系数 * 权重值);
+                    // 检查600包装是否可用
+                    bool 可以用600 = false;
+                    if (六百包装 != null)
+                    {
+                        var 临时组 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>(当前组);
+                        临时组.Add(下一个灯带);
+                        可以用600 = 检查包装是否可用(六百包装, 型号, 预计累计灯带米数, 预计累计线材长度, 权重值, 临时组);
+                    }
 
-                    // 检查是否超出限制
-                    bool 超出灯带限制 = 预计累计灯带米数 > 调整后最大灯带米数;
-                    bool 超出线材限制 = 预计累计线材长度 > 调整后最大线材长度;
-
-                    // 只有当两个维度都满足调整后的限制时，才添加到当前组
-                    if (!超出灯带限制 && !超出线材限制)
+                    // 只有当至少一种包装可用时，才添加到当前组
+                    if (可以用470 || 可以用600)
                     {
                         当前组.Add(下一个灯带);
                         current灯带米数 = 预计累计灯带米数;
@@ -1878,22 +2186,32 @@ namespace 包装计算
                 if (当前组.Count == 1)
                 {
                     // 尝试使用单条包装
-                    var 单条包装列表 = 匹配包装列表
-                        .Where(p => p.包装类型.Contains("单条"))
-                        .OrderBy(p => p.支持产品型号列表.FirstOrDefault(x => x.产品型号 == 型号).灯带最大长度)
+                    var 单条包装列表 = 非Luminii包装列表
+                        .Where(p => p.包装类型?.Contains("单条") == true)
+                        .OrderBy(p =>
+                        {
+                            if (p.包装名称?.Contains("330") == true) return 1;
+                            if (p.包装名称?.Contains("470") == true) return 2;
+                            if (p.包装名称?.Contains("600") == true) return 3;
+                            return 4;
+                        })
                         .ToList();
 
                     bool 找到单条包装 = false;
                     foreach (var 包装 in 单条包装列表)
                     {
-                        var 单条产品信息 = 包装.支持产品型号列表.FirstOrDefault(p => p.产品型号 == 型号);
+                        var 单条产品信息 = 包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                        if (单条产品信息 == null) continue;
+
                         var 灯带 = 当前组[0];
+                        var 单条灯带列表 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> { 灯带 };
+                        bool 忽略线长限制 = !需要计算线长(单条灯带列表);
 
                         if (灯带.灯带长度 <= 单条产品信息.灯带最大长度 &&
                             灯带.灯带长度 >= 单条产品信息.最低阈值 &&
-                            灯带.线材长度 <= 单条产品信息.线材最大长度)
+                            (忽略线长限制 || 灯带.线材长度 <= 单条产品信息.线材最大长度))
                         {
-                            单条包装列表记录.Add((包装.包装名称, 包装.物料码, 灯带.序号, 灯带.灯带长度, 灯带.线材长度));
+                            单条包装列表记录.Add((包装.包装名称, 包装.物料码, 灯带.序号, 灯带.灯带长度, 灯带.线材长度, 灯带.标签码1, 灯带.标签码2, 灯带.标签码3, 灯带.标签码4, 灯带.客户型号, 灯带.标签显示长度));
                             找到单条包装 = true;
                             break;
                         }
@@ -1901,25 +2219,2342 @@ namespace 包装计算
 
                     if (!找到单条包装)
                     {
-                        使用的包装列表.Add((当前包装.包装名称, 当前包装.物料码, 当前组));
+                        // 如果找不到合适的单条包装，尝试使用多条包装
+                        bool 可以用470单条 = false;
+                        if (四七零包装 != null)
+                        {
+                            var 单条灯带列表 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> { 当前组[0] };
+                            可以用470单条 = 检查包装是否可用(四七零包装, 型号, 当前组[0].灯带长度, 当前组[0].线材长度, 权重值, 单条灯带列表);
+
+                            if (可以用470单条)
+                            {
+                                使用的包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 当前组));
+                            }
+                        }
+
+                        // 如果470不行，尝试600
+                        if (!可以用470单条 && 六百包装 != null)
+                        {
+                            var 单条灯带列表 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> { 当前组[0] };
+                            bool 可以用600单条 = 检查包装是否可用(六百包装, 型号, 当前组[0].灯带长度, 当前组[0].线材长度, 权重值, 单条灯带列表);
+
+                            if (可以用600单条)
+                            {
+                                使用的包装列表.Add((六百包装.包装名称, 六百包装.物料码, 当前组));
+                            }
+                            else
+                            {
+                                throw new Exception($"无法找到合适的包装方案处理灯带 {当前组[0].序号}");
+                            }
+                        }
                     }
                 }
                 else
                 {
-                    使用的包装列表.Add((当前包装.包装名称, 当前包装.物料码, 当前组));
+                    // 多条包装处理
+                    bool 可以用470多条 = false;
+                    if (四七零包装 != null)
+                    {
+                        可以用470多条 = 检查包装是否可用(四七零包装, 型号, current灯带米数, current线材长度, 权重值, 当前组);
+                    }
+
+                    // 优先使用470包装
+                    if (可以用470多条)
+                    {
+                        使用的包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 当前组));
+                    }
+                    else if (六百包装 != null)
+                    {
+                        bool 可以用600多条 = 检查包装是否可用(六百包装, 型号, current灯带米数, current线材长度, 权重值, 当前组);
+                        if (可以用600多条)
+                        {
+                            使用的包装列表.Add((六百包装.包装名称, 六百包装.物料码, 当前组));
+                        }
+                        else
+                        {
+                            throw new Exception("无法找到合适的多条包装");
+                        }
+                    }
+                    else
+                    {
+                        throw new Exception("无法找到合适的多条包装");
+                    }
                 }
             }
 
             return (使用的包装列表, 单条包装列表记录);
         }
 
+        /// <summary>
+        /// 执行UL客户方案 - 每条灯带单独包装，按照330-470-600顺序选择最合适的包装
+        /// </summary>
+        private (List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表,
+         List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表)
+执行RU客户方案(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
+        {
+            // 排除Luminii包装
+            var 非Luminii包装列表 = 匹配包装列表.Where(p => !p.包装名称.Contains("Luminii")).ToList();
+
+            // 创建空的结果列表
+            List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表 =
+                new List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)>();
+
+            List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表 =
+                new List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>();
+
+            // 定义UL客户包装规格顺序
+            List<int> 包装规格顺序 = new List<int> { 330, 470, 600 };
+
+            // 按照包装名称中的数字大小排序匹配包装列表，使用非Luminii包装列表
+            非Luminii包装列表 = 非Luminii包装列表.OrderBy(p =>
+            {
+                // 从包装名称中提取数字
+                var match = Regex.Match(p.包装名称, @"\d+");
+                if (match.Success && int.TryParse(match.Value, out int size))
+                {
+                    // 找到该尺寸在顺序列表中的位置
+                    int index = 包装规格顺序.IndexOf(size);
+                    return index >= 0 ? index : int.MaxValue; // 如果不在列表中，放到最后
+                }
+                return int.MaxValue;
+            }).ToList();
+
+            // 创建待处理灯带的副本
+            var 待处理灯带 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>(长度列表);
+
+            // 为每条灯带选择最合适的包装
+            while (待处理灯带.Count > 0)
+            {
+                var 当前灯带 = 待处理灯带[0];
+                待处理灯带.RemoveAt(0);
+
+                bool 已找到包装 = false;
+
+                // 按照优先顺序尝试每种包装，使用非Luminii包装列表
+                foreach (var 包装 in 非Luminii包装列表)
+                {
+                    // 查找该型号的产品信息
+                    var 产品信息 = 包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                    if (产品信息 == null) continue;
+
+                    // 检查灯带长度和线材长度是否符合要求
+                    if (当前灯带.灯带长度 <= 产品信息.灯带最大长度 && 当前灯带.线材长度 <= 产品信息.线材最大长度)
+                    {
+                        // 找到合适的包装，添加到单条包装列表
+                        单条包装列表.Add((包装.包装名称, 包装.物料码, 当前灯带.序号, 当前灯带.灯带长度, 当前灯带.线材长度, 当前灯带.标签码1, 当前灯带.标签码2, 当前灯带.标签码3, 当前灯带.标签码4, 当前灯带.客户型号, 当前灯带.标签显示长度));
+                        已找到包装 = true;
+                        break;
+                    }
+                }
+
+                // 如果没有找到合适的包装，使用最大的包装，从非Luminii包装列表中选择
+                if (!已找到包装 && 非Luminii包装列表.Count > 0)
+                {
+                    var 最大包装 = 非Luminii包装列表.Last();
+                    var 产品信息 = 最大包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+
+                    if (产品信息 != null)
+                    {
+                        单条包装列表.Add((最大包装.包装名称, 最大包装.物料码, 当前灯带.序号, 当前灯带.灯带长度, 当前灯带.线材长度, 当前灯带.标签码1, 当前灯带.标签码2, 当前灯带.标签码3, 当前灯带.标签码4, 当前灯带.客户型号, 当前灯带.标签显示长度));
+                    }
+                    else
+                    {
+                        // 如果没有找到支持该型号的包装，记录错误
+                        Console.WriteLine($"错误：找不到支持型号 {型号} 的非Luminii包装，灯带序号：{当前灯带.序号}");
+                    }
+                }
+            }
+
+            return (多条包装列表, 单条包装列表);
+        }
+
+        /// <summary>
+        /// 显示UL客户方案结果
+        /// </summary>
+        private void 显示RU客户方案结果(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
+        {
+            // 执行UL客户方案
+            var RU方案 = 执行RU客户方案(匹配包装列表, 长度列表, 型号);
+
+            int 方案包装数 = RU方案.多条包装列表.Count + RU方案.单条包装列表.Count;
+
+            StringBuilder 结果 = new StringBuilder();
+            结果.AppendLine("UL客户包装方案结果：");
+            结果.AppendLine($"需要包装数：{方案包装数}");
+            结果.AppendLine($"  多条包装：{RU方案.多条包装列表.Count} 个");
+            结果.AppendLine($"  单条包装：{RU方案.单条包装列表.Count} 个");
+            结果.AppendLine();
+
+            结果.AppendLine("----------------------------------------");
+            结果.AppendLine("包装方案详情：");
+
+            // 按照包装物料码分组统计
+            var 包装统计 = RU方案.单条包装列表
+                .GroupBy(x => x.物料码)
+                .Select(g => new { 物料码 = g.Key, 数量 = g.Count(), 包装名称 = g.First().包装名称 })
+                .OrderBy(x => x.包装名称)
+                .ToList();
+
+            结果.AppendLine("包装使用统计：");
+            foreach (var 统计 in 包装统计)
+            {
+                结果.AppendLine($"  {统计.包装名称} (物料码: {统计.物料码}): {统计.数量} 个");
+            }
+
+            结果.AppendLine("\n单条包装详情：");
+            foreach (var 包装 in RU方案.单条包装列表)
+            {
+                结果.AppendLine($"  序号: {包装.序号}, 灯带长度: {包装.灯带长度:F3}m, 线材长度: {包装.线材长度:F3}m, 包装: {包装.包装名称} (物料码: {包装.物料码})");
+            }
+
+            // 保存日志
+            保存日志(结果.ToString(), "UL客户包装方案结果", Path.GetFileName(当前处理文件名));
+
+            // 创建Excel文件(方案组合结果EXCEL)
+            string 文件夹路径 = Path.Combine(Application.StartupPath, "输出结果", 变量.订单编号);
+            if (!Directory.Exists(文件夹路径))
+            {
+                Directory.CreateDirectory(文件夹路径);
+            }
+
+            string 文件路径 = Path.Combine(文件夹路径, "RU_" + Path.GetFileName(当前处理文件名));
+            using (ExcelPackage package = new ExcelPackage(new FileInfo(文件路径)))
+            {
+                int 包装序号 = 1;
+
+                // 处理单条包装
+                foreach (var 包装 in RU方案.单条包装列表)
+                {
+                    ExcelWorksheet worksheet = package.Workbook.Worksheets.Add($"第{包装序号}盒");
+
+                    // 设置表头
+                    worksheet.Cells[1, 1].Value = "序号";
+                    worksheet.Cells[1, 2].Value = "条数";
+                    worksheet.Cells[1, 3].Value = "米数";
+                    worksheet.Cells[1, 4].Value = "标签码1";
+                    worksheet.Cells[1, 5].Value = "标签码2";
+                    worksheet.Cells[1, 6].Value = "实际剪切长度";
+                    worksheet.Cells[1, 7].Value = "实际剪切长度/米";
+                    worksheet.Cells[1, 8].Value = "线长";
+                    worksheet.Cells[1, 9].Value = "包装编码";
+                    worksheet.Cells[1, 13].Value = "客户型号"; // 新增
+                    worksheet.Cells[1, 14].Value = "标签显示长度"; // 新增
+
+                    // 填充单条包装数据
+                    worksheet.Cells[2, 1].Value = 包装.序号;  // 直接使用原始序号
+                    worksheet.Cells[2, 2].Value = 1;
+                    worksheet.Cells[2, 3].Value = Math.Round(包装.灯带长度, 3);
+                    worksheet.Cells[2, 8].Value = Math.Round(包装.线材长度, 3);
+                    worksheet.Cells[2, 9].Value = 包装.物料码;
+                    worksheet.Cells[2, 13].Value = 包装.客户型号;
+                    worksheet.Cells[2, 14].Value = 包装.标签显示长度;
+
+                    包装序号++;
+                }
+
+                package.Save();
+            }
+
+            包装方案 方案对象 = new 包装方案
+            {
+                多条包装列表 = RU方案.多条包装列表,
+                单条包装列表 = RU方案.单条包装列表
+            };
+            生成包装材料需求流转单_4(文件夹路径, "RU_" + 当前处理文件名, 方案对象);
+
+            //MessageBox.Show($"RU客户方案已生成，共需要{方案包装数}个包装。", "RU客户方案");
+        }
+
+        private (List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表,
+         List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表)
+执行Luminii客户方案(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
+        {
+            // 筛选 Luminii 的包装
+            var Luminii包装列表 = 匹配包装列表.Where(p => p.包装名称.Contains("Luminii")).ToList();
+
+            var 多条包装列表 = new List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)>();
+            var 单条包装列表 = new List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>();
+
+            // 获取Luminii多条包装
+            var 多条包装 = Luminii包装列表.FirstOrDefault(p =>
+                p.包装类型?.Contains("多条") == true ||
+                p.包装类型?.Contains("2条") == true ||
+                p.包装类型?.Contains("3条") == true);
+
+            // 获取Luminii单条包装
+            var 单条包装列表数据 = Luminii包装列表
+                .Where(p => p.包装类型?.Contains("单条") == true)
+                .OrderBy(p => p.包装名称)
+                .ToList();
+
+            if (多条包装 == null)
+            {
+                MessageBox.Show("未找到Luminii多条包装方案", "提示");
+                return (多条包装列表, 单条包装列表);
+            }
+
+            double 权重值 = uiTextBox_权重值.Text.ToDouble();
+
+            // 不同于标签码1不能混装方案，这里不按标签码分组
+            // 直接处理所有灯带，因为不需要区分标签码
+            var 待处理灯带 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>(长度列表);
+
+            // 先尝试将所有灯带放在一起
+            double 总灯带长度 = 待处理灯带.Sum(x => x.灯带长度);
+            double 总线材长度 = 待处理灯带.Sum(x => x.线材长度);
+            bool 忽略线长限制_整组 = !需要计算线长(待处理灯带);
+            bool 整组放入一个包装 = false;
+
+            // 检查多条包装是否可以容纳所有灯带
+            var 产品信息 = 多条包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+            if (产品信息 != null)
+            {
+                bool 可以用多条包装 = 产品信息 != null &&
+                                  总灯带长度 <= 产品信息.灯带最大长度 &&
+                                  (忽略线长限制_整组 || 总线材长度 <= 产品信息.线材最大长度);
+
+                Console.WriteLine($"检查是否可以将整组放入Luminii多条包装: 总长={总灯带长度}m, 最大长度={产品信息?.灯带最大长度}m, 可用={可以用多条包装}");
+
+                if (可以用多条包装)
+                {
+                    多条包装列表.Add((多条包装.包装名称, 多条包装.物料码, 待处理灯带));
+                    整组放入一个包装 = true;
+                }
+            }
+
+            // 如果整组不能放入一个包装，则分批处理
+            if (!整组放入一个包装)
+            {
+                while (待处理灯带.Count > 0)
+                {
+                    var 当前组 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>();
+                    double current灯带米数 = 0;
+                    double current线材长度 = 0;
+
+                    // 处理第一条灯带
+                    var 第一个灯带 = 待处理灯带[0];
+                    当前组.Add(第一个灯带);
+                    current灯带米数 = 第一个灯带.灯带长度;
+                    current线材长度 = 第一个灯带.线材长度;
+                    待处理灯带.RemoveAt(0);
+
+                    // 尝试继续添加灯带 - 这里不同于标签码1方案，不需要检查标签码是否相同
+                    int 最大迭代次数 = 1000;
+                    int 当前迭代 = 0;
+
+                    while (待处理灯带.Any() && 当前迭代 < 最大迭代次数)
+                    {
+                        当前迭代++;
+                        var 下一个灯带 = 待处理灯带[0];
+
+                        double 预计累计灯带米数 = current灯带米数 + 下一个灯带.灯带长度;
+                        double 预计累计线材长度 = current线材长度 + 下一个灯带.线材长度;
+
+                        var 当前灯带组 = 当前组.Concat(new[] { 下一个灯带 }).ToList();
+
+                        // 检查多条包装是否可用
+                        bool 忽略线长限制 = !需要计算线长(当前灯带组);
+                        bool 可以用多条包装 = false;
+
+                        if (产品信息 != null)
+                        {
+                            可以用多条包装 = 预计累计灯带米数 <= 产品信息.灯带最大长度 &&
+                                             (忽略线长限制 || 预计累计线材长度 <= 产品信息.线材最大长度);
+                        }
+
+                        // 添加调试信息
+                        string 调试信息 = $"尝试合并灯带 序号:{下一个灯带.序号}, 标签码1:{下一个灯带.标签码1}\n" +
+                                       $"累计灯带长度:{预计累计灯带米数}m, 累计线材长度:{预计累计线材长度}m\n" +
+                                       $"Luminii多条包装可用:{可以用多条包装}";
+
+                        调试信息 += $"\nLuminii多条包装最大长度:{产品信息?.灯带最大长度}m, 最低阈值:{产品信息?.最低阈值}m";
+
+                        // 使用日志输出而不是MessageBox，避免阻塞
+                        Console.WriteLine(调试信息);
+
+                        if (可以用多条包装)
+                        {
+                            当前组.Add(下一个灯带);
+                            current灯带米数 = 预计累计灯带米数;
+                            current线材长度 = 预计累计线材长度;
+                            待处理灯带.RemoveAt(0);
+                            Console.WriteLine($"添加灯带成功，当前组数量: {当前组.Count}, 剩余待处理: {待处理灯带.Count}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"无法添加灯带 {下一个灯带.序号} 到当前组");
+                            break;
+                        }
+                    }
+
+                    // 处理当前组
+                    if (当前组.Count > 0)
+                    {
+                        bool 忽略线长限制 = !需要计算线长(当前组);
+
+                        if (产品信息 != null)
+                        {
+                            bool 可以用多条包装 = current灯带米数 <= 产品信息.灯带最大长度 &&
+                                               (忽略线长限制 || current线材长度 <= 产品信息.线材最大长度);
+
+                            if (可以用多条包装)
+                            {
+                                多条包装列表.Add((多条包装.包装名称, 多条包装.物料码, 当前组));
+                                continue;
+                            }
+                        }
+
+                        // 检查是否可以使用最低阈值限制
+                        if (产品信息 != null)
+                        {
+                            bool 可以用多条包装 = current灯带米数 <= 产品信息.灯带最大长度 &&
+                                               current灯带米数 >= 产品信息.最低阈值 &&
+                                               (忽略线长限制 || current线材长度 <= 产品信息.线材最大长度);
+
+                            if (可以用多条包装)
+                            {
+                                多条包装列表.Add((多条包装.包装名称, 多条包装.物料码, 当前组));
+                                continue;
+                            }
+                        }
+
+                        // 如果只有一条灯带且多条包装不可用，尝试单条包装
+                        if (当前组.Count == 1 && 单条包装列表数据.Any())
+                        {
+                            var 灯带 = 当前组[0];
+                            bool 找到单条包装 = false;
+
+                            foreach (var 包装 in 单条包装列表数据)
+                            {
+                                bool 忽略线长_单条 = !需要计算线长(当前组);
+                                var 单条产品信息 = 包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+
+                                if (单条产品信息 == null) continue;
+
+                                if (灯带.灯带长度 <= 单条产品信息.灯带最大长度 &&
+                                    灯带.灯带长度 >= 单条产品信息.最低阈值 &&
+                                            (忽略线长_单条 || 灯带.线材长度 <= 单条产品信息.线材最大长度))
+                                {
+                                    单条包装列表.Add((包装.包装名称, 包装.物料码, 灯带.序号, 灯带.灯带长度, 灯带.线材长度, 灯带.标签码1, 灯带.标签码2, 灯带.标签码3, 灯带.标签码4, 灯带.客户型号, 灯带.标签显示长度));
+                                    找到单条包装 = true;
+                                    break;
+                                }
+                            }
+
+                            // 如果没找到单条包装，强制使用多条包装
+                            if (!找到单条包装)
+                            {
+                                多条包装列表.Add((多条包装.包装名称, 多条包装.物料码, 当前组));
+                            }
+                        }
+                        else
+                        {
+                            // 多条灯带但无法使用多条包装，强制使用
+                            多条包装列表.Add((多条包装.包装名称, 多条包装.物料码, 当前组));
+                        }
+                    }
+                }
+            }
+
+            return (多条包装列表, 单条包装列表);
+        }
+
+        private void 显示Luminii客户方案结果(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
+        {
+            // 执行Luminii客户方案
+            var Luminii方案 = 执行Luminii客户方案(匹配包装列表, 长度列表, 型号);
+
+            int 方案包装数 = Luminii方案.多条包装列表.Count + Luminii方案.单条包装列表.Count;
+
+            StringBuilder 结果 = new StringBuilder();
+            结果.AppendLine("Luminii客户包装方案结果：");
+            结果.AppendLine($"需要包装数：{方案包装数}");
+            结果.AppendLine($"  多条包装：{Luminii方案.多条包装列表.Count} 个");
+            结果.AppendLine($"  单条包装：{Luminii方案.单条包装列表.Count} 个");
+            结果.AppendLine();
+
+            // 显示多条包装详情
+            if (Luminii方案.多条包装列表.Any())
+            {
+                结果.AppendLine("多条包装详情：");
+                foreach (var 包装 in Luminii方案.多条包装列表)
+                {
+                    结果.AppendLine($"包装名称: {包装.包装名称}");
+                    结果.AppendLine($"物料码: {包装.物料码}");
+                    结果.AppendLine("包含灯带:");
+                    double 包装内总灯带长度 = 0;
+                    double 包装内总线材长度 = 0;
+
+                    foreach (var 灯带 in 包装.包含灯带)
+                    {
+                        结果.AppendLine($"  序号: {灯带.序号}");
+                        结果.AppendLine($"    灯带长度: {灯带.灯带长度:F2}m");
+                        结果.AppendLine($"    线材长度: {灯带.线材长度:F2}m");
+                        结果.AppendLine($"    标签码1: {灯带.标签码1}");
+                        结果.AppendLine($"    标签码2: {灯带.标签码2}");
+                        结果.AppendLine($"    标签码3: {灯带.标签码3}");
+                        结果.AppendLine($"    标签码4: {灯带.标签码4}");
+                        包装内总灯带长度 += 灯带.灯带长度;
+                        包装内总线材长度 += 灯带.线材长度;
+                    }
+                    结果.AppendLine($"包装内总灯带长度: {包装内总灯带长度:F2}m");
+                    结果.AppendLine($"包装内总线材长度: {包装内总线材长度:F2}m");
+                    结果.AppendLine("----------------------------------------");
+                }
+            }
+
+            // 显示单条包装详情
+            if (Luminii方案.单条包装列表.Any())
+            {
+                结果.AppendLine("\n单条包装详情：");
+                foreach (var (包装名称, 物料码, 序号, 灯带长度, 线材长度, 标签码1, 标签码2, 标签码3, 标签码4, 客户型号, 标签显示长度) in Luminii方案.单条包装列表)
+                {
+                    结果.AppendLine($"包装名称: {包装名称}");
+                    结果.AppendLine($"物料码: {物料码}");
+                    结果.AppendLine($"序号: {序号}");
+                    结果.AppendLine($"  灯带长度: {灯带长度:F2}m");
+                    结果.AppendLine($"  线材长度: {线材长度:F2}m");
+                    结果.AppendLine($"  标签码1: {标签码1}");
+                    结果.AppendLine($"  标签码2: {标签码2}");
+                    结果.AppendLine($"  标签码3: {标签码3}");
+                    结果.AppendLine($"  标签码4: {标签码4}");
+                    结果.AppendLine("----------------------------------------");
+                }
+            }
+
+            // 保存日志
+            保存日志(结果.ToString(), "Luminii客户包装方案结果", Path.GetFileName(当前处理文件名));
+
+            //MessageBox.Show("准备生成Luminii方案的Excel文件和流转单");
+
+            // 创建Excel文件
+            string 文件夹路径 = Path.Combine(Application.StartupPath, "输出结果", 变量.订单编号);
+            if (!Directory.Exists(文件夹路径))
+            {
+                Directory.CreateDirectory(文件夹路径);
+            }
+
+            string 文件路径 = Path.Combine(文件夹路径, "Luminii_" + Path.GetFileName(当前处理文件名));
+            using (ExcelPackage package = new ExcelPackage(new FileInfo(文件路径)))
+            {
+                int 包装序号 = 1;
+
+                // 处理多条包装
+                foreach (var 包装 in Luminii方案.多条包装列表)
+                {
+                    ExcelWorksheet worksheet = package.Workbook.Worksheets.Add($"第{包装序号}盒");
+
+                    // 设置表头
+                    worksheet.Cells[1, 1].Value = "序号";
+                    worksheet.Cells[1, 2].Value = "条数";
+                    worksheet.Cells[1, 3].Value = "米数";
+                    worksheet.Cells[1, 4].Value = "标签码1";
+                    worksheet.Cells[1, 5].Value = "标签码2";
+                    worksheet.Cells[1, 6].Value = "标签码3";
+                    worksheet.Cells[1, 7].Value = "标签码4";
+                    worksheet.Cells[1, 8].Value = "线长";
+                    worksheet.Cells[1, 9].Value = "包装编码";
+                    worksheet.Cells[1, 13].Value = "客户型号";
+                    worksheet.Cells[1, 14].Value = "标签显示长度";
+
+                    // 填充数据
+                    int row = 2;
+                    foreach (var 灯带 in 包装.包含灯带)
+                    {
+                        worksheet.Cells[row, 1].Value = 灯带.序号;
+                        worksheet.Cells[row, 2].Value = 1;
+                        worksheet.Cells[row, 3].Value = Math.Round(灯带.灯带长度, 3);
+                        worksheet.Cells[row, 4].Value = 灯带.标签码1;
+                        worksheet.Cells[row, 5].Value = 灯带.标签码2;
+                        worksheet.Cells[row, 6].Value = 灯带.标签码3;
+                        worksheet.Cells[row, 7].Value = 灯带.标签码4;
+                        worksheet.Cells[row, 8].Value = Math.Round(灯带.线材长度, 3);
+                        worksheet.Cells[row, 9].Value = 包装.物料码;
+                        worksheet.Cells[row, 13].Value = 灯带.客户型号;
+                        worksheet.Cells[row, 14].Value = 灯带.标签显示长度;
+
+                        // 设置单元格样式
+                        using (var range = worksheet.Cells[row, 1, row, 9])
+                        {
+                            range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                        }
+
+                        row++;
+                    }
+
+                    包装序号++;
+                }
+
+                // 处理单条包装
+                foreach (var 包装 in Luminii方案.单条包装列表)
+                {
+                    ExcelWorksheet worksheet = package.Workbook.Worksheets.Add($"第{包装序号}盒");
+
+                    // 设置表头
+                    worksheet.Cells[1, 1].Value = "序号";
+                    worksheet.Cells[1, 2].Value = "条数";
+                    worksheet.Cells[1, 3].Value = "米数";
+                    worksheet.Cells[1, 4].Value = "标签码1";
+                    worksheet.Cells[1, 5].Value = "标签码2";
+                    worksheet.Cells[1, 6].Value = "标签码3";
+                    worksheet.Cells[1, 7].Value = "标签码4";
+                    worksheet.Cells[1, 8].Value = "线长";
+                    worksheet.Cells[1, 9].Value = "包装编码";
+                    worksheet.Cells[1, 13].Value = "客户型号";
+                    worksheet.Cells[1, 14].Value = "标签显示长度";
+
+                    // 填充单条包装数据
+                    worksheet.Cells[2, 1].Value = 包装.序号;
+                    worksheet.Cells[2, 2].Value = 1;
+                    worksheet.Cells[2, 3].Value = Math.Round(包装.灯带长度, 3);
+                    worksheet.Cells[2, 4].Value = 包装.标签码1;
+                    worksheet.Cells[2, 5].Value = 包装.标签码2;
+                    worksheet.Cells[2, 6].Value = 包装.标签码3;
+                    worksheet.Cells[2, 7].Value = 包装.标签码4;
+                    worksheet.Cells[2, 8].Value = Math.Round(包装.线材长度, 3);
+                    worksheet.Cells[2, 9].Value = 包装.物料码;
+                    worksheet.Cells[2, 13].Value = 包装.客户型号;
+                    worksheet.Cells[2, 14].Value = 包装.标签显示长度;
+
+                    // 设置单元格样式
+                    using (var range = worksheet.Cells[2, 1, 2, 9])
+                    {
+                        range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                    }
+
+                    包装序号++;
+                }
+
+                package.Save();
+            }
+
+            包装方案 选定方案 = new 包装方案
+            {
+                多条包装列表 = Luminii方案.多条包装列表,
+                单条包装列表 = Luminii方案.单条包装列表
+            };
+
+            // 生成包装材料需求流转单
+            生成包装材料需求流转单_4(文件夹路径, "Luminii_" + 当前处理文件名, 选定方案);
+
+            uiTextBox_状态.AppendText($"Luminii客户方案已生成，共需要{方案包装数}个包装。" + Environment.NewLine);
+            uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
+        }
+
+        private (List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表,
+         List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表)
+执行Luminii不同标签码2方案(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
+        {
+            // 添加辅助方法：判断是否需要计算线长
+            bool 需要计算线长(List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 灯带列表)
+            {
+                if (灯带列表.Count > 4) return true;  // 超过4条需要计算
+                return 灯带列表.Any(x => x.线材长度 > 5.0);  // 有任何一条超过5米需要计算
+            }
+
+            List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 使用的包装列表
+                = new List<(string, string, List<(string, double, double, string, string, string, string, string, string)>)>();
+
+            List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表记录
+                = new List<(string, string, string, double, double, string, string, string, string, string, string)>();
+
+            double 权重值 = uiTextBox_权重值.Text.ToDouble();
+
+            // 只选择Luminii包装
+            var Luminii包装列表 = 匹配包装列表.Where(p => p.包装名称.Contains("Luminii")).ToList();
+
+            if (!Luminii包装列表.Any())
+            {
+                throw new Exception("未找到Luminii包装");
+            }
+
+            // 获取600的多条包装
+            var 六百包装 = Luminii包装列表.FirstOrDefault(p => p.包装种类?.Contains("600") == true &&
+                (p.包装类型?.Contains("多条") == true || p.包装类型?.Contains("2条") == true || p.包装类型?.Contains("3条") == true));
+
+            if (六百包装 == null)
+            {
+                throw new Exception("未找到Luminii 600包装");
+            }
+
+            // 按标签码2分组
+            var 分组后的灯带 = 长度列表.GroupBy(x => x.标签码2 ?? "").ToList();
+
+            foreach (var 组 in 分组后的灯带)
+            {
+                var 待处理灯带 = 组.ToList();
+                var 当前组 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>();
+                double current灯带米数 = 0;
+                double current线材长度 = 0;
+
+                // 获取产品信息
+                var 产品信息 = 六百包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                if (产品信息 == null)
+                {
+                    throw new Exception($"未找到型号 {型号} 的产品信息");
+                }
+
+                foreach (var 灯带 in 待处理灯带)
+                {
+                    // 判断添加这条灯带后是否需要计算线长限制
+                    var 预计组 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>(当前组);
+                    预计组.Add(灯带);
+                    bool 需要考虑线长 = 需要计算线长(预计组);  // 如果加入这条后超过4条或有线长>5米，则需要考虑线长
+
+                    bool 可以添加;
+                    if (需要考虑线长)
+                    {
+                        // 需要计算线长时，使用权重计算
+                        double 累计灯带权重系数 = (current灯带米数 + 灯带.灯带长度) / 产品信息.灯带最大长度;
+                        double 累计线材权重系数 = (current线材长度 + 灯带.线材长度) / 产品信息.线材最大长度;
+
+                        double 调整后最大线材长度 = 产品信息.线材最大长度 * (1 - 累计灯带权重系数 * 权重值);
+                        double 调整后最大灯带米数 = 产品信息.灯带最大长度 * (1 - 累计线材权重系数 * 权重值);
+
+                        可以添加 = (current灯带米数 + 灯带.灯带长度) <= 调整后最大灯带米数 &&
+                                  (current线材长度 + 灯带.线材长度) <= 调整后最大线材长度;
+                    }
+                    else
+                    {
+                        // 不需要计算线长时，只检查灯带长度
+                        可以添加 = (current灯带米数 + 灯带.灯带长度) <= 产品信息.灯带最大长度;
+                    }
+
+                    if (可以添加)
+                    {
+                        当前组.Add(灯带);
+                        current灯带米数 += 灯带.灯带长度;
+                        current线材长度 += 灯带.线材长度;
+                    }
+                    else
+                    {
+                        // 当前组已满，保存并创建新组
+                        if (当前组.Any())
+                        {
+                            使用的包装列表.Add((六百包装.包装名称, 六百包装.物料码, 当前组));
+                        }
+                        当前组 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> { 灯带 };
+                        current灯带米数 = 灯带.灯带长度;
+                        current线材长度 = 灯带.线材长度;
+                    }
+                }
+
+                // 处理最后一组
+                if (当前组.Any())
+                {
+                    使用的包装列表.Add((六百包装.包装名称, 六百包装.物料码, 当前组));
+                }
+            }
+
+            return (使用的包装列表, 单条包装列表记录);
+        }
+
+        private void 显示Luminii不同标签码2方案结果(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
+        {
+            var 方案结果 = 执行Luminii不同标签码2方案(匹配包装列表, 长度列表, 型号);
+
+            int 方案包装数 = 方案结果.多条包装列表.Count + 方案结果.单条包装列表.Count;
+
+            StringBuilder 结果 = new StringBuilder();
+            结果.AppendLine("Luminii-不同标签码2不能混装方案结果：");
+            结果.AppendLine($"需要包装数：{方案包装数}");
+            结果.AppendLine($"  多条包装：{方案结果.多条包装列表.Count} 个");
+            结果.AppendLine($"  单条包装：{方案结果.单条包装列表.Count} 个");
+            结果.AppendLine();
+
+            if (方案结果.多条包装列表.Any())
+            {
+                结果.AppendLine("多条包装详情：");
+                foreach (var 包装 in 方案结果.多条包装列表)
+                {
+                    结果.AppendLine($"包装名称: {包装.包装名称}");
+                    结果.AppendLine($"物料码: {包装.物料码}");
+                    结果.AppendLine("包含灯带:");
+                    double 包装内总灯带长度 = 0;
+                    double 包装内总线材长度 = 0;
+
+                    foreach (var 灯带 in 包装.包含灯带)
+                    {
+                        结果.AppendLine($"  序号: {灯带.序号}");
+                        结果.AppendLine($"    灯带长度: {灯带.灯带长度:F2}m");
+                        结果.AppendLine($"    线材长度: {灯带.线材长度:F2}m");
+                        结果.AppendLine($"    标签码1: {灯带.标签码1}");
+                        结果.AppendLine($"    标签码2: {灯带.标签码2}");
+                        结果.AppendLine($"    标签码3: {灯带.标签码3}");
+                        结果.AppendLine($"    标签码4: {灯带.标签码4}");
+                        包装内总灯带长度 += 灯带.灯带长度;
+                        包装内总线材长度 += 灯带.线材长度;
+                    }
+                    结果.AppendLine($"包装内总灯带长度: {包装内总灯带长度:F2}m");
+                    结果.AppendLine($"包装内总线材长度: {包装内总线材长度:F2}m");
+                    结果.AppendLine("----------------------------------------");
+                }
+            }
+
+            if (方案结果.单条包装列表.Any())
+            {
+                结果.AppendLine("\n单条包装详情：");
+                foreach (var (包装名称, 物料码, 序号, 灯带长度, 线材长度, 标签码1, 标签码2, 标签码3, 标签码4, 客户型号, 标签显示长度) in 方案结果.单条包装列表)
+                {
+                    结果.AppendLine($"包装名称: {包装名称}");
+                    结果.AppendLine($"物料码: {物料码}");
+                    结果.AppendLine($"序号: {序号}");
+                    结果.AppendLine($"  灯带长度: {灯带长度:F2}m");
+                    结果.AppendLine($"  线材长度: {线材长度:F2}m");
+                    结果.AppendLine($"  标签码1: {标签码1}");
+                    结果.AppendLine($"  标签码2: {标签码2}");
+                    结果.AppendLine($"  标签码3: {标签码3}");
+                    结果.AppendLine($"  标签码4: {标签码4}");
+                    结果.AppendLine("----------------------------------------");
+                }
+            }
+
+            保存日志(结果.ToString(), "Luminii-不同标签码2不能混装方案结果", Path.GetFileName(当前处理文件名));
+
+            string 文件夹路径 = Path.Combine(Application.StartupPath, "输出结果", 变量.订单编号);
+            if (!Directory.Exists(文件夹路径))
+            {
+                Directory.CreateDirectory(文件夹路径);
+            }
+
+            string 文件路径 = Path.Combine(文件夹路径, "Luminii_不同标签码2_" + Path.GetFileName(当前处理文件名));
+            using (ExcelPackage package = new ExcelPackage(new FileInfo(文件路径)))
+            {
+                int 包装序号 = 1;
+
+                foreach (var 包装 in 方案结果.多条包装列表)
+                {
+                    ExcelWorksheet worksheet = package.Workbook.Worksheets.Add($"第{包装序号}盒");
+
+                    worksheet.Cells[1, 1].Value = "序号";
+                    worksheet.Cells[1, 2].Value = "条数";
+                    worksheet.Cells[1, 3].Value = "米数";
+                    worksheet.Cells[1, 4].Value = "标签码1";
+                    worksheet.Cells[1, 5].Value = "标签码2";
+                    worksheet.Cells[1, 6].Value = "标签码3";
+                    worksheet.Cells[1, 7].Value = "标签码4";
+                    worksheet.Cells[1, 8].Value = "线长";
+                    worksheet.Cells[1, 9].Value = "包装编码";
+                    worksheet.Cells[1, 13].Value = "客户型号";
+                    worksheet.Cells[1, 14].Value = "标签显示长度";
+
+                    int row = 2;
+                    foreach (var 灯带 in 包装.包含灯带)
+                    {
+                        worksheet.Cells[row, 1].Value = 灯带.序号;
+                        worksheet.Cells[row, 2].Value = 1;
+                        worksheet.Cells[row, 3].Value = Math.Round(灯带.灯带长度, 3);
+                        worksheet.Cells[row, 4].Value = 灯带.标签码1;
+                        worksheet.Cells[row, 5].Value = 灯带.标签码2;
+                        worksheet.Cells[row, 6].Value = 灯带.标签码3;
+                        worksheet.Cells[row, 7].Value = 灯带.标签码4;
+                        worksheet.Cells[row, 8].Value = Math.Round(灯带.线材长度, 3);
+                        worksheet.Cells[row, 9].Value = 包装.物料码;
+                        worksheet.Cells[row, 13].Value = 灯带.客户型号;
+                        worksheet.Cells[row, 14].Value = 灯带.标签显示长度;
+
+                        using (var range = worksheet.Cells[row, 1, row, 9])
+                        {
+                            range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                        }
+
+                        row++;
+                    }
+
+                    包装序号++;
+                }
+
+                foreach (var 包装 in 方案结果.单条包装列表)
+                {
+                    ExcelWorksheet worksheet = package.Workbook.Worksheets.Add($"第{包装序号}盒");
+
+                    worksheet.Cells[1, 1].Value = "序号";
+                    worksheet.Cells[1, 2].Value = "条数";
+                    worksheet.Cells[1, 3].Value = "米数";
+                    worksheet.Cells[1, 4].Value = "标签码1";
+                    worksheet.Cells[1, 5].Value = "标签码2";
+                    worksheet.Cells[1, 6].Value = "标签码3";
+                    worksheet.Cells[1, 7].Value = "标签码4";
+                    worksheet.Cells[1, 8].Value = "线长";
+                    worksheet.Cells[1, 9].Value = "包装编码";
+                    worksheet.Cells[1, 13].Value = "客户型号";
+                    worksheet.Cells[1, 14].Value = "标签显示长度";
+
+                    worksheet.Cells[2, 1].Value = 包装.序号;
+                    worksheet.Cells[2, 2].Value = 1;
+                    worksheet.Cells[2, 3].Value = Math.Round(包装.灯带长度, 3);
+                    worksheet.Cells[2, 4].Value = 包装.标签码1;
+                    worksheet.Cells[2, 5].Value = 包装.标签码2;
+                    worksheet.Cells[2, 6].Value = 包装.标签码3;
+                    worksheet.Cells[2, 7].Value = 包装.标签码4;
+                    worksheet.Cells[2, 8].Value = Math.Round(包装.线材长度, 3);
+                    worksheet.Cells[2, 9].Value = 包装.物料码;
+                    worksheet.Cells[2, 13].Value = 包装.客户型号;
+                    worksheet.Cells[2, 14].Value = 包装.标签显示长度;
+
+                    using (var range = worksheet.Cells[2, 1, 2, 9])
+                    {
+                        range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                    }
+
+                    包装序号++;
+                }
+
+                package.Save();
+            }
+            包装方案 选定方案 = new 包装方案
+            {
+                多条包装列表 = 方案结果.多条包装列表,
+                单条包装列表 = 方案结果.单条包装列表
+            };
+
+            // 生成包装材料需求流转单
+            生成包装材料需求流转单_4(文件夹路径, "Luminii_不同标签码2_" + Path.GetFileName(当前处理文件名), 选定方案);
+
+            uiTextBox_状态.AppendText($"Luminii-不同标签码2不能混装方案已生成，共需要{方案包装数}个包装。" + Environment.NewLine);
+            uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
+        }
+
+        private (List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表,
+         List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表)
+执行不同序号不可混装方案(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
+        {
+            List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 使用的包装列表
+                = new List<(string, string, List<(string, double, double, string, string, string, string, string, string)>)>();
+
+            List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表记录
+                = new List<(string, string, string, double, double, string, string, string, string, string, string)>();
+
+            double 权重值 = uiTextBox_权重值.Text.ToDouble();
+
+            // 排除Luminii包装
+            var 非Luminii包装列表 = 匹配包装列表.Where(p => !p.包装名称.Contains("Luminii")).ToList();
+
+            // 获取470和600的多条包装
+            var 四七零包装 = 非Luminii包装列表.FirstOrDefault(p => p.包装名称?.Contains("470") == true &&
+                (p.包装类型?.Contains("多条") == true || p.包装类型?.Contains("2条") == true || p.包装类型?.Contains("3条") == true));
+
+            var 六百包装 = 非Luminii包装列表.FirstOrDefault(p => p.包装名称?.Contains("600") == true &&
+                (p.包装类型?.Contains("多条") == true || p.包装类型?.Contains("2条") == true || p.包装类型?.Contains("3条") == true));
+
+            // 按序号前缀分组 - 直接在这里修改，不使用新方法
+            var 序号分组 = 长度列表.GroupBy(x =>
+            {
+                if (x.序号 != null && x.序号.Contains("-"))
+                    return x.序号.Split('-')[0];
+                return x.序号;
+            }).ToList();
+
+            foreach (var 组 in 序号分组)
+            {
+                var 待处理灯带 = 组.ToList();
+
+                while (待处理灯带.Any())
+                {
+                    var 当前组 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>();
+                    double current灯带米数 = 0;
+                    double current线材长度 = 0;
+
+                    // 提取序号前缀
+                    string 当前序号前缀;
+                    if (待处理灯带[0].序号 != null && 待处理灯带[0].序号.Contains("-"))
+                        当前序号前缀 = 待处理灯带[0].序号.Split('-')[0];
+                    else
+                        当前序号前缀 = 待处理灯带[0].序号;
+
+                    var 多条产品信息 = 四七零包装?.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号) ??
+                                    六百包装?.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+
+                    if (多条产品信息 == null) continue;
+
+                    // 处理第一条灯带
+                    var 第一个灯带 = 待处理灯带[0];
+                    当前组.Add(第一个灯带);
+                    current灯带米数 = 第一个灯带.灯带长度;
+                    current线材长度 = 第一个灯带.线材长度;
+                    待处理灯带.RemoveAt(0);
+
+                    // 尝试继续添加相同序号前缀的后续灯带
+                    while (待处理灯带.Any())
+                    {
+                        var 下一个灯带 = 待处理灯带[0];
+
+                        // 提取下一个灯带的序号前缀
+                        string 下一个序号前缀;
+                        if (下一个灯带.序号 != null && 下一个灯带.序号.Contains("-"))
+                            下一个序号前缀 = 下一个灯带.序号.Split('-')[0];
+                        else
+                            下一个序号前缀 = 下一个灯带.序号;
+
+                        // 检查序号前缀是否相同
+                        if (下一个序号前缀 != 当前序号前缀)
+                        {
+                            break; // 如果不同，停止当前分组
+                        }
+
+                        double 预计累计灯带米数 = current灯带米数 + 下一个灯带.灯带长度;
+                        double 预计累计线材长度 = current线材长度 + 下一个灯带.线材长度;
+
+                        var 当前灯带组 = 当前组.Concat(new[] { 下一个灯带 }).ToList();
+
+                        // 检查是否需要计算线长
+                        bool 忽略线长限制 = !需要计算线长(当前灯带组);
+
+                        // 检查470包装是否可用
+                        bool 可以用470 = false;
+                        if (四七零包装 != null)
+                        {
+                            var 产品信息470 = 四七零包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                            可以用470 = 产品信息470 != null &&
+                                      预计累计灯带米数 <= 产品信息470.灯带最大长度 &&
+                                      预计累计灯带米数 >= 产品信息470.最低阈值 &&
+                                      (忽略线长限制 || 预计累计线材长度 <= 产品信息470.线材最大长度);
+                        }
+
+                        // 检查600包装是否可用
+                        bool 可以用600 = false;
+                        if (六百包装 != null)
+                        {
+                            var 产品信息600 = 六百包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                            可以用600 = 产品信息600 != null &&
+                                      预计累计灯带米数 <= 产品信息600.灯带最大长度 &&
+                                      预计累计灯带米数 >= 产品信息600.最低阈值 &&
+                                      (忽略线长限制 || 预计累计线材长度 <= 产品信息600.线材最大长度);
+                        }
+
+                        if (可以用470 || 可以用600)
+                        {
+                            当前组.Add(下一个灯带);
+                            current灯带米数 = 预计累计灯带米数;
+                            current线材长度 = 预计累计线材长度;
+                            待处理灯带.RemoveAt(0);
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+
+                    // 处理当前组
+                    if (当前组.Count == 1)
+                    {
+                        // 尝试使用单条包装
+                        var 单条包装列表 = 非Luminii包装列表
+                            .Where(p => p.包装类型?.Contains("单条") == true)
+                            .OrderBy(p =>
+                            {
+                                if (p.包装名称?.Contains("330") == true) return 1;
+                                if (p.包装名称?.Contains("470") == true) return 2;
+                                if (p.包装名称?.Contains("600") == true) return 3;
+                                return 4;
+                            })
+                            .ToList();
+
+                        bool 找到单条包装 = false;
+                        foreach (var 包装 in 单条包装列表)
+                        {
+                            var 灯带 = 当前组[0];
+                            bool 忽略线长限制 = !需要计算线长(当前组);
+
+                            var 单条产品信息 = 包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                            if (单条产品信息 == null) continue;
+
+                            if (灯带.灯带长度 <= 单条产品信息.灯带最大长度 &&
+                                灯带.灯带长度 >= 单条产品信息.最低阈值 &&
+                                (忽略线长限制 || 灯带.线材长度 <= 单条产品信息.线材最大长度))
+                            {
+                                单条包装列表记录.Add((包装.包装名称, 包装.物料码, 灯带.序号, 灯带.灯带长度, 灯带.线材长度, 灯带.标签码1, 灯带.标签码2, 灯带.标签码3, 灯带.标签码4, 灯带.客户型号, 灯带.标签显示长度));
+                                找到单条包装 = true;
+                                break;
+                            }
+                        }
+
+                        if (!找到单条包装)
+                        {
+                            // 如果找不到合适的单条包装，尝试使用多条包装
+                            var 灯带 = 当前组[0];
+                            bool 忽略线长限制 = !需要计算线长(当前组);
+
+                            var 产品信息470 = 四七零包装?.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                            bool 可以用470单条 = 四七零包装 != null && 产品信息470 != null &&
+                                               灯带.灯带长度 <= 产品信息470.灯带最大长度 &&
+                                               灯带.灯带长度 >= 产品信息470.最低阈值 &&
+                                               (忽略线长限制 || 灯带.线材长度 <= 产品信息470.线材最大长度);
+
+                            if (可以用470单条)
+                            {
+                                使用的包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 当前组));
+                            }
+                            else if (六百包装 != null)
+                            {
+                                var 产品信息600 = 六百包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                                bool 可以用600单条 = 产品信息600 != null &&
+                                                   灯带.灯带长度 <= 产品信息600.灯带最大长度 &&
+                                                   灯带.灯带长度 >= 产品信息600.最低阈值 &&
+                                                   (忽略线长限制 || 灯带.线材长度 <= 产品信息600.线材最大长度);
+
+                                if (可以用600单条)
+                                {
+                                    使用的包装列表.Add((六百包装.包装名称, 六百包装.物料码, 当前组));
+                                }
+                                else
+                                {
+                                    throw new Exception($"无法找到合适的包装方案处理灯带 {灯带.序号}");
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // 多条包装处理
+                        bool 忽略线长限制 = !需要计算线长(当前组);
+
+                        var 产品信息470 = 四七零包装?.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                        bool 可以用470多条 = 四七零包装 != null && 产品信息470 != null &&
+                                           current灯带米数 <= 产品信息470.灯带最大长度 &&
+                                           current灯带米数 >= 产品信息470.最低阈值 &&
+                                           (忽略线长限制 || current线材长度 <= 产品信息470.线材最大长度);
+
+                        if (可以用470多条)
+                        {
+                            使用的包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 当前组));
+                        }
+                        else if (六百包装 != null)
+                        {
+                            var 产品信息600 = 六百包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                            bool 可以用600多条 = 产品信息600 != null &&
+                                               current灯带米数 <= 产品信息600.灯带最大长度 &&
+                                               current灯带米数 >= 产品信息600.最低阈值 &&
+                                               (忽略线长限制 || current线材长度 <= 产品信息600.线材最大长度);
+
+                            if (可以用600多条)
+                            {
+                                使用的包装列表.Add((六百包装.包装名称, 六百包装.物料码, 当前组));
+                            }
+                            else
+                            {
+                                throw new Exception("无法找到合适的多条包装");
+                            }
+                        }
+                    }
+                }
+            }
+
+            return (使用的包装列表, 单条包装列表记录);
+        }
+
+        private void 显示不同序号不可混装方案结果(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
+        {
+            var 方案结果 = 执行不同序号不可混装方案(匹配包装列表, 长度列表, 型号);
+
+            int 方案包装数 = 方案结果.多条包装列表.Count + 方案结果.单条包装列表.Count;
+
+            StringBuilder 结果 = new StringBuilder();
+            结果.AppendLine("不同序号不可混装方案结果：");
+            结果.AppendLine($"需要包装数：{方案包装数}");
+            结果.AppendLine($"  多条包装：{方案结果.多条包装列表.Count} 个");
+            结果.AppendLine($"  单条包装：{方案结果.单条包装列表.Count} 个");
+            结果.AppendLine();
+
+            if (方案结果.多条包装列表.Any())
+            {
+                结果.AppendLine("多条包装详情：");
+                foreach (var 包装 in 方案结果.多条包装列表)
+                {
+                    结果.AppendLine($"包装名称: {包装.包装名称}");
+                    结果.AppendLine($"物料码: {包装.物料码}");
+                    结果.AppendLine("包含灯带:");
+                    double 包装内总灯带长度 = 0;
+                    double 包装内总线材长度 = 0;
+
+                    foreach (var 灯带 in 包装.包含灯带)
+                    {
+                        结果.AppendLine($"  序号: {灯带.序号}");
+                        结果.AppendLine($"    灯带长度: {灯带.灯带长度:F2}m");
+                        结果.AppendLine($"    线材长度: {灯带.线材长度:F2}m");
+                        结果.AppendLine($"    标签码1: {灯带.标签码1}");
+                        结果.AppendLine($"    标签码2: {灯带.标签码2}");
+                        结果.AppendLine($"    标签码3: {灯带.标签码3}");
+                        结果.AppendLine($"    标签码4: {灯带.标签码4}");
+                        包装内总灯带长度 += 灯带.灯带长度;
+                        包装内总线材长度 += 灯带.线材长度;
+                    }
+                    结果.AppendLine($"包装内总灯带长度: {包装内总灯带长度:F2}m");
+                    结果.AppendLine($"包装内总线材长度: {包装内总线材长度:F2}m");
+                    结果.AppendLine("----------------------------------------");
+                }
+            }
+
+            if (方案结果.单条包装列表.Any())
+            {
+                结果.AppendLine("\n单条包装详情：");
+                foreach (var (包装名称, 物料码, 序号, 灯带长度, 线材长度, 标签码1, 标签码2, 标签码3, 标签码4, 客户型号, 标签显示长度) in 方案结果.单条包装列表)
+                {
+                    结果.AppendLine($"包装名称: {包装名称}");
+                    结果.AppendLine($"物料码: {物料码}");
+                    结果.AppendLine($"序号: {序号}");
+                    结果.AppendLine($"  灯带长度: {灯带长度:F2}m");
+                    结果.AppendLine($"  线材长度: {线材长度:F2}m");
+                    结果.AppendLine($"  标签码1: {标签码1}");
+                    结果.AppendLine($"  标签码2: {标签码2}");
+                    结果.AppendLine($"  标签码3: {标签码3}");
+                    结果.AppendLine($"  标签码4: {标签码4}");
+                    结果.AppendLine("----------------------------------------");
+                }
+            }
+
+            保存日志(结果.ToString(), "不同序号不可混装方案结果", Path.GetFileName(当前处理文件名));
+
+            string outputDirectory = Path.Combine(Application.StartupPath, "输出结果", 变量.订单编号);
+            if (!Directory.Exists(outputDirectory))
+            {
+                Directory.CreateDirectory(outputDirectory);
+            }
+
+            string outputFilePath = Path.Combine(outputDirectory, "不同序号不可混装_" + Path.GetFileName(当前处理文件名));
+            using (ExcelPackage package = new ExcelPackage(new FileInfo(outputFilePath)))
+            {
+                int 包装序号 = 1;
+
+                foreach (var 包装 in 方案结果.多条包装列表)
+                {
+                    ExcelWorksheet worksheet = package.Workbook.Worksheets.Add($"第{包装序号}盒");
+
+                    worksheet.Cells[1, 1].Value = "序号";
+                    worksheet.Cells[1, 2].Value = "条数";
+                    worksheet.Cells[1, 3].Value = "米数";
+                    worksheet.Cells[1, 4].Value = "标签码1";
+                    worksheet.Cells[1, 5].Value = "标签码2";
+                    worksheet.Cells[1, 6].Value = "标签码3";
+                    worksheet.Cells[1, 7].Value = "标签码4";
+                    worksheet.Cells[1, 8].Value = "线长";
+                    worksheet.Cells[1, 9].Value = "包装编码";
+                    worksheet.Cells[1, 13].Value = "客户型号";
+                    worksheet.Cells[1, 14].Value = "标签显示长度";
+
+                    int row = 2;
+                    foreach (var 灯带 in 包装.包含灯带)
+                    {
+                        worksheet.Cells[row, 1].Value = 灯带.序号;
+                        worksheet.Cells[row, 2].Value = 1;
+                        worksheet.Cells[row, 3].Value = Math.Round(灯带.灯带长度, 3);
+                        worksheet.Cells[row, 4].Value = 灯带.标签码1;
+                        worksheet.Cells[row, 5].Value = 灯带.标签码2;
+                        worksheet.Cells[row, 6].Value = 灯带.标签码3;
+                        worksheet.Cells[row, 7].Value = 灯带.标签码4;
+                        worksheet.Cells[row, 8].Value = Math.Round(灯带.线材长度, 3);
+                        worksheet.Cells[row, 9].Value = 包装.物料码;
+                        worksheet.Cells[row, 13].Value = 灯带.客户型号;
+                        worksheet.Cells[row, 14].Value = 灯带.标签显示长度;
+
+                        using (var range = worksheet.Cells[row, 1, row, 9])
+                        {
+                            range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                        }
+
+                        row++;
+                    }
+
+                    包装序号++;
+                }
+
+                foreach (var 包装 in 方案结果.单条包装列表)
+                {
+                    ExcelWorksheet worksheet = package.Workbook.Worksheets.Add($"第{包装序号}盒");
+
+                    worksheet.Cells[1, 1].Value = "序号";
+                    worksheet.Cells[1, 2].Value = "条数";
+                    worksheet.Cells[1, 3].Value = "米数";
+                    worksheet.Cells[1, 4].Value = "标签码1";
+                    worksheet.Cells[1, 5].Value = "标签码2";
+                    worksheet.Cells[1, 6].Value = "标签码3";
+                    worksheet.Cells[1, 7].Value = "标签码4";
+                    worksheet.Cells[1, 8].Value = "线长";
+                    worksheet.Cells[1, 9].Value = "包装编码";
+                    worksheet.Cells[1, 13].Value = "客户型号";
+                    worksheet.Cells[1, 14].Value = "标签显示长度";
+
+                    worksheet.Cells[2, 1].Value = 包装.序号;
+                    worksheet.Cells[2, 2].Value = 1;
+                    worksheet.Cells[2, 3].Value = Math.Round(包装.灯带长度, 3);
+                    worksheet.Cells[2, 4].Value = 包装.标签码1;
+                    worksheet.Cells[2, 5].Value = 包装.标签码2;
+                    worksheet.Cells[2, 6].Value = 包装.标签码3;
+                    worksheet.Cells[2, 7].Value = 包装.标签码4;
+                    worksheet.Cells[2, 8].Value = Math.Round(包装.线材长度, 3);
+                    worksheet.Cells[2, 9].Value = 包装.物料码;
+                    worksheet.Cells[2, 13].Value = 包装.客户型号;
+                    worksheet.Cells[2, 14].Value = 包装.标签显示长度;
+
+                    using (var range = worksheet.Cells[2, 1, 2, 9])
+                    {
+                        range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                    }
+
+                    包装序号++;
+                }
+
+                package.Save();
+            }
+
+            // 创建包装方案对象，用于生成流转单
+            包装方案 选定方案 = new 包装方案
+            {
+                多条包装列表 = 方案结果.多条包装列表,
+                单条包装列表 = 方案结果.单条包装列表,
+                方案名称 = "不同序号不可混装方案"
+            };
+
+            // 生成包装材料需求流转单
+            生成包装材料需求流转单_4(outputDirectory, "不同序号不可混装_" + Path.GetFileName(当前处理文件名), 选定方案);
+
+            uiTextBox_状态.AppendText($"不同序号不可混装方案已生成，共需要{方案包装数}个包装。" + Environment.NewLine);
+            uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
+        }
+
+        private (List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表,
+         List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表)
+执行不同标签码1不能混装方案(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
+        {
+            var 非Luminii包装列表 = 匹配包装列表.Where(p => !p.包装名称.Contains("Luminii")).ToList();
+
+            var 多条包装列表 = new List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)>();
+            var 单条包装列表 = new List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>();
+
+            var 四七零包装 = 非Luminii包装列表.FirstOrDefault(p => p.包装名称?.Contains("470") == true &&
+                (p.包装类型?.Contains("多条") == true || p.包装类型?.Contains("2条") == true || p.包装类型?.Contains("3条") == true));
+            var 六百包装 = 非Luminii包装列表.FirstOrDefault(p => p.包装名称?.Contains("600") == true &&
+                (p.包装类型?.Contains("多条") == true || p.包装类型?.Contains("2条") == true || p.包装类型?.Contains("3条") == true));
+
+            var 单条包装列表数据 = 非Luminii包装列表
+                .Where(p => p.包装类型?.Contains("单条") == true)
+                .OrderBy(p =>
+                {
+                    if (p.包装名称?.Contains("330") == true) return 1;
+                    if (p.包装名称?.Contains("470") == true) return 2;
+                    if (p.包装名称?.Contains("600") == true) return 3;
+                    return 4;
+                })
+                .ToList();
+
+            if (四七零包装 == null && 六百包装 == null)
+            {
+                MessageBox.Show("未找到合适的多条包装方案", "提示");
+                return (多条包装列表, 单条包装列表);
+            }
+
+            double 权重值 = uiTextBox_权重值.Text.ToDouble();
+
+            var 标签码1分组 = 长度列表.GroupBy(x => x.标签码1).ToList();
+
+            foreach (var 组 in 标签码1分组)
+            {
+                var 待处理灯带 = 组.ToList();
+                string 当前标签码1 = 待处理灯带[0].标签码1;
+
+                while (待处理灯带.Any())
+                {
+                    var 当前组 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>();
+                    double current灯带米数 = 0;
+                    double current线材长度 = 0;
+
+                    var 第一个灯带 = 待处理灯带[0];
+                    当前组.Add(第一个灯带);
+                    current灯带米数 = 第一个灯带.灯带长度;
+                    current线材长度 = 第一个灯带.线材长度;
+                    待处理灯带.RemoveAt(0);
+
+                    int 最大迭代次数 = 1000;
+                    int 当前迭代 = 0;
+
+                    while (待处理灯带.Any() && 当前迭代 < 最大迭代次数)
+                    {
+                        当前迭代++;
+                        var 下一个灯带 = 待处理灯带[0];
+                        if (下一个灯带.标签码1 != 当前标签码1)
+                        {
+                            break;
+                        }
+                        double 预计累计灯带米数 = current灯带米数 + 下一个灯带.灯带长度;
+                        double 预计累计线材长度 = current线材长度 + 下一个灯带.线材长度;
+                        var 当前灯带组 = 当前组.Concat(new[] { 下一个灯带 }).ToList();
+
+                        bool 可以用470 = 四七零包装 != null && 检查包装是否可用(四七零包装, 型号, 预计累计灯带米数, 预计累计线材长度, 权重值, 当前灯带组);
+                        bool 可以用600 = 六百包装 != null && 检查包装是否可用(六百包装, 型号, 预计累计灯带米数, 预计累计线材长度, 权重值, 当前灯带组);
+
+                        if (可以用470 || 可以用600)
+                        {
+                            当前组.Add(下一个灯带);
+                            current灯带米数 = 预计累计灯带米数;
+                            current线材长度 = 预计累计线材长度;
+                            待处理灯带.RemoveAt(0);
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+
+                    if (当前组.Count == 1)
+                    {
+                        bool 找到单条包装 = false;
+                        foreach (var 包装 in 单条包装列表数据)
+                        {
+                            var 单条产品信息 = 包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                            if (单条产品信息 == null) continue;
+                            var 灯带 = 当前组[0];
+                            var 单条灯带列表 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> { 灯带 };
+                            bool 忽略线长限制 = !需要计算线长(单条灯带列表);
+                            if (灯带.灯带长度 <= 单条产品信息.灯带最大长度 &&
+                                灯带.灯带长度 >= 单条产品信息.最低阈值 &&
+                                (忽略线长限制 || 灯带.线材长度 <= 单条产品信息.线材最大长度))
+                            {
+                                单条包装列表.Add((包装.包装名称, 包装.物料码, 灯带.序号, 灯带.灯带长度, 灯带.线材长度, 灯带.标签码1, 灯带.标签码2, 灯带.标签码3, 灯带.标签码4, 灯带.客户型号, 灯带.标签显示长度));
+                                找到单条包装 = true;
+                                break;
+                            }
+                        }
+                        if (!找到单条包装)
+                        {
+                            bool 可以用470单条 = false;
+                            if (四七零包装 != null)
+                            {
+                                var 单条灯带列表 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> { 当前组[0] };
+                                可以用470单条 = 检查包装是否可用(四七零包装, 型号, 当前组[0].灯带长度, 当前组[0].线材长度, 权重值, 单条灯带列表);
+                                if (可以用470单条)
+                                {
+                                    多条包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 当前组));
+                                }
+                            }
+                            if (!可以用470单条 && 六百包装 != null)
+                            {
+                                var 单条灯带列表 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> { 当前组[0] };
+                                bool 可以用600单条 = 检查包装是否可用(六百包装, 型号, 当前组[0].灯带长度, 当前组[0].线材长度, 权重值, 单条灯带列表);
+                                if (可以用600单条)
+                                {
+                                    多条包装列表.Add((六百包装.包装名称, 六百包装.物料码, 当前组));
+                                }
+                                else
+                                {
+                                    throw new Exception($"无法找到合适的包装方案处理灯带 {当前组[0].序号}");
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        bool 可以用470多条 = false;
+                        if (四七零包装 != null)
+                        {
+                            可以用470多条 = 检查包装是否可用(四七零包装, 型号, current灯带米数, current线材长度, 权重值, 当前组);
+                        }
+                        if (可以用470多条)
+                        {
+                            多条包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 当前组));
+                        }
+                        else if (六百包装 != null)
+                        {
+                            bool 可以用600多条 = 检查包装是否可用(六百包装, 型号, current灯带米数, current线材长度, 权重值, 当前组);
+                            if (可以用600多条)
+                            {
+                                多条包装列表.Add((六百包装.包装名称, 六百包装.物料码, 当前组));
+                            }
+                            else
+                            {
+                                throw new Exception("无法找到合适的多条包装");
+                            }
+                        }
+                        else
+                        {
+                            throw new Exception("无法找到合适的多条包装");
+                        }
+                    }
+                }
+            }
+            return (多条包装列表, 单条包装列表);
+        }
+
+        private (List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表,
+         List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表)
+执行不同标签码1不能混装方案1(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
+        {
+            // 排除 Luminii 的包装
+            var 非Luminii包装列表 = 匹配包装列表.Where(p => !p.包装名称.Contains("Luminii")).ToList();
+
+            var 多条包装列表 = new List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)>();
+            var 单条包装列表 = new List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>();
+
+            // 获取470和600的多条包装
+            var 四七零包装 = 非Luminii包装列表.FirstOrDefault(p => p.包装名称?.Contains("470") == true &&
+                (p.包装类型?.Contains("多条") == true || p.包装类型?.Contains("2条") == true || p.包装类型?.Contains("3条") == true));
+
+            var 六百包装 = 非Luminii包装列表.FirstOrDefault(p => p.包装名称?.Contains("600") == true &&
+                (p.包装类型?.Contains("多条") == true || p.包装类型?.Contains("2条") == true || p.包装类型?.Contains("3条") == true));
+
+            // 获取单条包装列表，按优先级排序
+            var 单条包装列表数据 = 非Luminii包装列表
+                .Where(p => p.包装类型?.Contains("单条") == true)
+                .OrderBy(p =>
+                {
+                    if (p.包装名称?.Contains("330") == true) return 1;
+                    if (p.包装名称?.Contains("470") == true) return 2;
+                    if (p.包装名称?.Contains("600") == true) return 3;
+                    return 4;
+                })
+                .ToList();
+
+            if (四七零包装 == null && 六百包装 == null)
+            {
+                MessageBox.Show("未找到合适的多条包装方案", "提示");
+                return (多条包装列表, 单条包装列表);
+            }
+
+            double 权重值 = uiTextBox_权重值.Text.ToDouble();
+
+            // 按标签码1分组
+            var 标签码1分组 = 长度列表.GroupBy(x => x.标签码1).ToList();
+
+            foreach (var 组 in 标签码1分组)
+            {
+                var 待处理灯带 = 组.ToList();
+                string 当前标签码1 = 待处理灯带[0].标签码1;
+
+                // 先尝试将整组灯带放在一起（因为它们有相同的标签码1）
+                double 总灯带长度 = 待处理灯带.Sum(x => x.灯带长度);
+                double 总线材长度 = 待处理灯带.Sum(x => x.线材长度);
+                bool 忽略线长限制_整组 = !需要计算线长(待处理灯带);
+                bool 整组放入一个包装 = false;
+
+                // 先检查600包装
+                if (六百包装 != null)
+                {
+                    var 产品信息600 = 六百包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                    bool 可以用600 = 产品信息600 != null &&
+                                    总灯带长度 <= 产品信息600.灯带最大长度 &&
+                                    (忽略线长限制_整组 || 总线材长度 <= 产品信息600.线材最大长度);
+
+                    Console.WriteLine($"检查是否可以将整组放入600包装: 总长={总灯带长度}m, 最大长度={产品信息600?.灯带最大长度}m, 可用={可以用600}");
+
+                    if (可以用600)
+                    {
+                        多条包装列表.Add((六百包装.包装名称, 六百包装.物料码, 待处理灯带));
+                        整组放入一个包装 = true;
+                    }
+                }
+
+                // 如果600不行，再检查470
+                if (!整组放入一个包装 && 四七零包装 != null)
+                {
+                    var 产品信息470 = 四七零包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                    bool 可以用470 = 产品信息470 != null &&
+                                    总灯带长度 <= 产品信息470.灯带最大长度 &&
+                                    (忽略线长限制_整组 || 总线材长度 <= 产品信息470.线材最大长度);
+
+                    Console.WriteLine($"检查是否可以将整组放入470包装: 总长={总灯带长度}m, 最大长度={产品信息470?.灯带最大长度}m, 可用={可以用470}");
+
+                    if (可以用470)
+                    {
+                        多条包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 待处理灯带));
+                        整组放入一个包装 = true;
+                    }
+                }
+
+                // 如果整组能放入一个包装，继续处理下一组
+                if (整组放入一个包装)
+                {
+                    continue;
+                }
+
+                // 如果整组不能放入一个包装，则使用原有逻辑分批处理
+                while (待处理灯带.Count > 0)
+                {
+                    var 当前组 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>();
+                    double current灯带米数 = 0;
+                    double current线材长度 = 0;
+
+                    // 处理第一条灯带
+                    var 第一个灯带 = 待处理灯带[0];
+                    当前组.Add(第一个灯带);
+                    current灯带米数 = 第一个灯带.灯带长度;
+                    current线材长度 = 第一个灯带.线材长度;
+                    待处理灯带.RemoveAt(0);
+
+                    // 尝试继续添加相同标签码1的灯带
+                    // 添加最大迭代次数防止无限循环
+                    int 最大迭代次数 = 1000;
+                    int 当前迭代 = 0;
+
+                    while (待处理灯带.Any() && 当前迭代 < 最大迭代次数)
+                    {
+                        当前迭代++;
+                        var 下一个灯带 = 待处理灯带[0];
+
+                        // 检查标签码1是否相同 - 实际上这是多余的检查，因为我们已经按标签码1分组
+                        if (下一个灯带.标签码1 != 当前标签码1)
+                        {
+                            break; // 如果不同，停止当前分组
+                        }
+
+                        double 预计累计灯带米数 = current灯带米数 + 下一个灯带.灯带长度;
+                        double 预计累计线材长度 = current线材长度 + 下一个灯带.线材长度;
+
+                        var 当前灯带组 = 当前组.Concat(new[] { 下一个灯带 }).ToList();
+
+                        // 检查包装是否可用 - 检查600和470
+                        bool 可以用600 = 六百包装 != null && 检查包装是否可用(六百包装, 型号, 预计累计灯带米数, 预计累计线材长度, 权重值, 当前灯带组);
+                        bool 可以用470 = 四七零包装 != null && 检查包装是否可用(四七零包装, 型号, 预计累计灯带米数, 预计累计线材长度, 权重值, 当前灯带组);
+
+                        // 添加调试信息
+                        string 调试信息 = $"尝试合并灯带 序号:{下一个灯带.序号}, 标签码1:{下一个灯带.标签码1}\n" +
+                                       $"累计灯带长度:{预计累计灯带米数}m, 累计线材长度:{预计累计线材长度}m\n" +
+                                       $"600可用:{可以用600}, 470可用:{可以用470}";
+
+                        var 产品信息600 = 六百包装?.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                        var 产品信息470 = 四七零包装?.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+
+                        调试信息 += $"\n600最大长度:{产品信息600?.灯带最大长度}m, 最低阈值:{产品信息600?.最低阈值}m";
+                        调试信息 += $"\n470最大长度:{产品信息470?.灯带最大长度}m, 最低阈值:{产品信息470?.最低阈值}m";
+
+                        // 使用日志输出而不是MessageBox，避免阻塞
+                        Console.WriteLine(调试信息);
+
+                        if (可以用600 || 可以用470)
+                        {
+                            当前组.Add(下一个灯带);
+                            current灯带米数 = 预计累计灯带米数;
+                            current线材长度 = 预计累计线材长度;
+                            待处理灯带.RemoveAt(0);
+                            Console.WriteLine($"添加灯带成功，当前组数量: {当前组.Count}, 剩余待处理: {待处理灯带.Count}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"无法添加灯带 {下一个灯带.序号} 到当前组");
+                            break;
+                        }
+                    }
+
+                    // 处理当前组
+                    if (当前组.Count > 0)
+                    {
+                        bool 忽略线长限制 = !需要计算线长(当前组);
+                        bool 所有标签码相同 = 当前组.All(x => x.标签码1 == 当前组[0].标签码1);
+
+                        // 先尝试600包装 - 通常容量更大
+                        if (六百包装 != null)
+                        {
+                            var 产品信息600 = 六百包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                            bool 可以用600 = 产品信息600 != null &&
+                                            current灯带米数 <= 产品信息600.灯带最大长度 &&
+                                            (忽略线长限制 || current线材长度 <= 产品信息600.线材最大长度);
+
+                            if (可以用600)
+                            {
+                                多条包装列表.Add((六百包装.包装名称, 六百包装.物料码, 当前组));
+                                continue;
+                            }
+                        }
+
+                        // 然后尝试470包装
+                        if (四七零包装 != null)
+                        {
+                            var 产品信息470 = 四七零包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                            bool 可以用470 = 产品信息470 != null &&
+                                            current灯带米数 <= 产品信息470.灯带最大长度 &&
+                                            (忽略线长限制 || current线材长度 <= 产品信息470.线材最大长度);
+
+                            if (可以用470)
+                            {
+                                多条包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 当前组));
+                                continue;
+                            }
+                        }
+
+                        // 检查是否可以使用最低阈值限制
+                        if (六百包装 != null)
+                        {
+                            var 产品信息600 = 六百包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                            bool 可以用600 = 产品信息600 != null &&
+                                            current灯带米数 <= 产品信息600.灯带最大长度 &&
+                                            current灯带米数 >= 产品信息600.最低阈值 &&
+                                            (忽略线长限制 || current线材长度 <= 产品信息600.线材最大长度);
+
+                            if (可以用600)
+                            {
+                                多条包装列表.Add((六百包装.包装名称, 六百包装.物料码, 当前组));
+                                continue;
+                            }
+                        }
+
+                        if (四七零包装 != null)
+                        {
+                            var 产品信息470 = 四七零包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                            bool 可以用470 = 产品信息470 != null &&
+                                            current灯带米数 <= 产品信息470.灯带最大长度 &&
+                                            current灯带米数 >= 产品信息470.最低阈值 &&
+                                            (忽略线长限制 || current线材长度 <= 产品信息470.线材最大长度);
+
+                            if (可以用470)
+                            {
+                                多条包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 当前组));
+                                continue;
+                            }
+                        }
+
+                        if (当前组.Count == 1 && 单条包装列表数据.Any())
+                        {
+                            var 灯带 = 当前组[0];
+                            bool 找到单条包装 = false;
+
+                            foreach (var 包装 in 单条包装列表数据)
+                            {
+                                bool 忽略线长_单条 = !需要计算线长(当前组);
+                                var 单条产品信息 = 包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+
+                                if (单条产品信息 == null) continue;
+
+                                if (灯带.灯带长度 <= 单条产品信息.灯带最大长度 &&
+                                    灯带.灯带长度 >= 单条产品信息.最低阈值 &&
+                                            (忽略线长_单条 || 灯带.线材长度 <= 单条产品信息.线材最大长度))
+                                {
+                                    单条包装列表.Add((包装.包装名称, 包装.物料码, 灯带.序号, 灯带.灯带长度, 灯带.线材长度, 灯带.标签码1, 灯带.标签码2, 灯带.标签码3, 灯带.标签码4, 灯带.客户型号, 灯带.标签显示长度));
+                                    找到单条包装 = true;
+                                    break;
+                                }
+                            }
+
+                            if (!找到单条包装)
+                            {
+                                if (四七零包装 != null)
+                                {
+                                    多条包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 当前组));
+                                }
+                                else if (六百包装 != null)
+                                {
+                                    多条包装列表.Add((六百包装.包装名称, 六百包装.物料码, 当前组));
+                                }
+                                else
+                                {
+                                    throw new Exception($"无法找到合适的包装方案处理灯带 {灯带.序号}");
+                                }
+                            }
+                        }
+                        else
+                        {
+                            if (四七零包装 != null)
+                            {
+                                多条包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 当前组));
+                            }
+                            else if (六百包装 != null)
+                            {
+                                多条包装列表.Add((六百包装.包装名称, 六百包装.物料码, 当前组));
+                            }
+                            else
+                            {
+                                throw new Exception("无法找到合适的多条包装");
+                            }
+                        }
+                    }
+                }
+            }
+
+            return (多条包装列表, 单条包装列表);
+        }
+
+        private void 显示不同标签码1不能混装方案结果(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
+        {
+            var 方案结果 = 执行不同标签码1不能混装方案(匹配包装列表, 长度列表, 型号);
+
+            int 方案包装数 = 方案结果.多条包装列表.Count + 方案结果.单条包装列表.Count;
+
+            StringBuilder 结果 = new StringBuilder();
+            结果.AppendLine("不同标签码1不能混装方案结果：");
+            结果.AppendLine($"需要包装数：{方案包装数}");
+            结果.AppendLine($"  多条包装：{方案结果.多条包装列表.Count} 个");
+            结果.AppendLine($"  单条包装：{方案结果.单条包装列表.Count} 个");
+            结果.AppendLine();
+
+            if (方案结果.多条包装列表.Any())
+            {
+                结果.AppendLine("多条包装详情：");
+                foreach (var 包装 in 方案结果.多条包装列表)
+                {
+                    结果.AppendLine($"包装名称: {包装.包装名称}");
+                    结果.AppendLine($"物料码: {包装.物料码}");
+                    结果.AppendLine("包含灯带:");
+                    double 包装内总灯带长度 = 0;
+                    double 包装内总线材长度 = 0;
+
+                    foreach (var 灯带 in 包装.包含灯带)
+                    {
+                        结果.AppendLine($"  序号: {灯带.序号}");
+                        结果.AppendLine($"    灯带长度: {灯带.灯带长度:F2}m");
+                        结果.AppendLine($"    线材长度: {灯带.线材长度:F2}m");
+                        结果.AppendLine($"    标签码1: {灯带.标签码1}");
+                        结果.AppendLine($"    标签码2: {灯带.标签码2}");
+                        结果.AppendLine($"    标签码3: {灯带.标签码3}");
+                        结果.AppendLine($"    标签码4: {灯带.标签码4}");
+                        包装内总灯带长度 += 灯带.灯带长度;
+                        包装内总线材长度 += 灯带.线材长度;
+                    }
+                    结果.AppendLine($"包装内总灯带长度: {包装内总灯带长度:F2}m");
+                    结果.AppendLine($"包装内总线材长度: {包装内总线材长度:F2}m");
+                    结果.AppendLine("----------------------------------------");
+                }
+            }
+
+            if (方案结果.单条包装列表.Any())
+            {
+                结果.AppendLine("\n单条包装详情：");
+                foreach (var (包装名称, 物料码, 序号, 灯带长度, 线材长度, 标签码1, 标签码2, 标签码3, 标签码4, 客户型号, 标签显示长度) in 方案结果.单条包装列表)
+                {
+                    结果.AppendLine($"包装名称: {包装名称}");
+                    结果.AppendLine($"物料码: {物料码}");
+                    结果.AppendLine($"序号: {序号}");
+                    结果.AppendLine($"  灯带长度: {灯带长度:F2}m");
+                    结果.AppendLine($"  线材长度: {线材长度:F2}m");
+                    结果.AppendLine($"  标签码1: {标签码1}");
+                    结果.AppendLine($"  标签码2: {标签码2}");
+                    结果.AppendLine($"  标签码3: {标签码3}");
+                    结果.AppendLine($"  标签码4: {标签码4}");
+                    结果.AppendLine("----------------------------------------");
+                }
+            }
+
+            保存日志(结果.ToString(), "不同标签码1不能混装方案结果", Path.GetFileName(当前处理文件名));
+
+            string outputDirectory = Path.Combine(Application.StartupPath, "输出结果", 变量.订单编号);
+            if (!Directory.Exists(outputDirectory))
+            {
+                Directory.CreateDirectory(outputDirectory);
+            }
+
+            string outputFilePath = Path.Combine(outputDirectory, "不同标签码1不能混装_" + Path.GetFileName(当前处理文件名));
+            using (ExcelPackage package = new ExcelPackage(new FileInfo(outputFilePath)))
+            {
+                int 包装序号 = 1;
+
+                foreach (var 包装 in 方案结果.多条包装列表)
+                {
+                    ExcelWorksheet worksheet = package.Workbook.Worksheets.Add($"第{包装序号}盒");
+
+                    worksheet.Cells[1, 1].Value = "序号";
+                    worksheet.Cells[1, 2].Value = "条数";
+                    worksheet.Cells[1, 3].Value = "米数";
+                    worksheet.Cells[1, 4].Value = "标签码1";
+                    worksheet.Cells[1, 5].Value = "标签码2";
+                    worksheet.Cells[1, 6].Value = "标签码3";
+                    worksheet.Cells[1, 7].Value = "标签码4";
+                    worksheet.Cells[1, 8].Value = "线长";
+                    worksheet.Cells[1, 9].Value = "包装编码";
+                    worksheet.Cells[1, 13].Value = "客户型号";
+                    worksheet.Cells[1, 14].Value = "标签显示长度";
+
+                    int row = 2;
+                    foreach (var 灯带 in 包装.包含灯带)
+                    {
+                        worksheet.Cells[row, 1].Value = 灯带.序号;
+                        worksheet.Cells[row, 2].Value = 1;
+                        worksheet.Cells[row, 3].Value = Math.Round(灯带.灯带长度, 3);
+                        worksheet.Cells[row, 4].Value = 灯带.标签码1;
+                        worksheet.Cells[row, 5].Value = 灯带.标签码2;
+                        worksheet.Cells[row, 6].Value = 灯带.标签码3;
+                        worksheet.Cells[row, 7].Value = 灯带.标签码4;
+                        worksheet.Cells[row, 8].Value = Math.Round(灯带.线材长度, 3);
+                        worksheet.Cells[row, 9].Value = 包装.物料码;
+                        worksheet.Cells[row, 13].Value = 灯带.客户型号;
+                        worksheet.Cells[row, 14].Value = 灯带.标签显示长度;
+
+                        using (var range = worksheet.Cells[row, 1, row, 9])
+                        {
+                            range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                        }
+
+                        row++;
+                    }
+
+                    包装序号++;
+                }
+
+                foreach (var 包装 in 方案结果.单条包装列表)
+                {
+                    ExcelWorksheet worksheet = package.Workbook.Worksheets.Add($"第{包装序号}盒");
+
+                    worksheet.Cells[1, 1].Value = "序号";
+                    worksheet.Cells[1, 2].Value = "条数";
+                    worksheet.Cells[1, 3].Value = "米数";
+                    worksheet.Cells[1, 4].Value = "标签码1";
+                    worksheet.Cells[1, 5].Value = "标签码2";
+                    worksheet.Cells[1, 6].Value = "标签码3";
+                    worksheet.Cells[1, 7].Value = "标签码4";
+                    worksheet.Cells[1, 8].Value = "线长";
+                    worksheet.Cells[1, 9].Value = "包装编码";
+                    worksheet.Cells[1, 13].Value = "客户型号";
+                    worksheet.Cells[1, 14].Value = "标签显示长度";
+
+                    worksheet.Cells[2, 1].Value = 包装.序号;
+                    worksheet.Cells[2, 2].Value = 1;
+                    worksheet.Cells[2, 3].Value = Math.Round(包装.灯带长度, 3);
+                    worksheet.Cells[2, 4].Value = 包装.标签码1;
+                    worksheet.Cells[2, 5].Value = 包装.标签码2;
+                    worksheet.Cells[2, 6].Value = 包装.标签码3;
+                    worksheet.Cells[2, 7].Value = 包装.标签码4;
+                    worksheet.Cells[2, 8].Value = Math.Round(包装.线材长度, 3);
+                    worksheet.Cells[2, 9].Value = 包装.物料码;
+                    worksheet.Cells[2, 13].Value = 包装.客户型号;
+                    worksheet.Cells[2, 14].Value = 包装.标签显示长度;
+
+                    using (var range = worksheet.Cells[2, 1, 2, 9])
+                    {
+                        range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                    }
+
+                    包装序号++;
+                }
+
+                package.Save();
+            }
+
+            // 创建包装方案对象，用于生成流转单
+            包装方案 选定方案 = new 包装方案
+            {
+                多条包装列表 = 方案结果.多条包装列表,
+                单条包装列表 = 方案结果.单条包装列表,
+                方案名称 = "不同标签码1不能混装方案"
+            };
+
+            构建标签码1分组字典(选定方案);
+
+            //string dictMsg = string.Join("\n", 标签码1分组字典.Select(kv => $"物料码: {kv.Key} -> 标签码1: [{string.Join(", ", kv.Value)}]"));
+            //MessageBox.Show(dictMsg, "标签码1分组字典内容");
+
+            // 生成包装材料需求流转单
+            生成包装材料需求流转单_4(outputDirectory, "不同标签码1不能混装_" + Path.GetFileName(当前处理文件名), 选定方案);
+
+            uiTextBox_状态.AppendText($"不同标签码1不能混装方案已生成，共需要{方案包装数}个包装。" + Environment.NewLine);
+            uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
+        }
+
+        private void 构建标签码1分组字典(包装方案 方案)
+        {
+            标签码1分组字典.Clear();
+            // 多条包装：每个“包装”就是一盒
+            foreach (var 包装 in 方案.多条包装列表)
+            {
+                string 物料码 = 包装.物料码;
+                // 取这一盒的标签码1（假设一盒内所有灯带标签码1都一样，取第一个即可）
+                string 标签码1 = 包装.包含灯带.FirstOrDefault().标签码1;
+                if (!标签码1分组字典.ContainsKey(物料码))
+                    标签码1分组字典[物料码] = new List<string>();
+                标签码1分组字典[物料码].Add(标签码1);
+            }
+            // 单条包装：每个包装就是一盒
+            foreach (var 包装 in 方案.单条包装列表)
+            {
+                string 物料码 = 包装.物料码;
+                string 标签码1 = 包装.标签码1;
+                if (!标签码1分组字典.ContainsKey(物料码))
+                    标签码1分组字典[物料码] = new List<string>();
+                标签码1分组字典[物料码].Add(标签码1);
+            }
+        }
+
+        private void 显示不同标签码2不能混装方案结果(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
+        {
+            // 排除 Luminii 的包装
+            var 非Luminii包装列表 = 匹配包装列表.Where(p => !p.包装名称.Contains("Luminii")).ToList();
+
+            var 方案结果 = 执行不同标签码2不能混装方案(非Luminii包装列表, 长度列表, 型号);
+
+            int 方案包装数 = 方案结果.多条包装列表.Count + 方案结果.单条包装列表.Count;
+
+            StringBuilder 结果 = new StringBuilder();
+            结果.AppendLine("不同标签码2不能混装方案结果：");
+            结果.AppendLine($"需要包装数：{方案包装数}");
+            结果.AppendLine($"  多条包装：{方案结果.多条包装列表.Count} 个");
+            结果.AppendLine($"  单条包装：{方案结果.单条包装列表.Count} 个");
+            结果.AppendLine();
+
+            if (方案结果.多条包装列表.Any())
+            {
+                结果.AppendLine("多条包装详情：");
+                foreach (var 包装 in 方案结果.多条包装列表)
+                {
+                    结果.AppendLine($"包装名称: {包装.包装名称}");
+                    结果.AppendLine($"物料码: {包装.物料码}");
+                    结果.AppendLine("包含灯带:");
+                    double 包装内总灯带长度 = 0;
+                    double 包装内总线材长度 = 0;
+
+                    foreach (var 灯带 in 包装.包含灯带)
+                    {
+                        结果.AppendLine($"  序号: {灯带.序号}");
+                        结果.AppendLine($"    灯带长度: {灯带.灯带长度:F2}m");
+                        结果.AppendLine($"    线材长度: {灯带.线材长度:F2}m");
+                        结果.AppendLine($"    标签码1: {灯带.标签码1}");
+                        结果.AppendLine($"    标签码2: {灯带.标签码2}");
+                        结果.AppendLine($"    标签码3: {灯带.标签码3}");
+                        结果.AppendLine($"    标签码4: {灯带.标签码4}");
+                        包装内总灯带长度 += 灯带.灯带长度;
+                        包装内总线材长度 += 灯带.线材长度;
+                    }
+                    结果.AppendLine($"包装内总灯带长度: {包装内总灯带长度:F2}m");
+                    结果.AppendLine($"包装内总线材长度: {包装内总线材长度:F2}m");
+                    结果.AppendLine("----------------------------------------");
+                }
+            }
+
+            if (方案结果.单条包装列表.Any())
+            {
+                结果.AppendLine("\n单条包装详情：");
+                foreach (var (包装名称, 物料码, 序号, 灯带长度, 线材长度, 标签码1, 标签码2, 标签码3, 标签码4, 客户型号, 标签显示长度) in 方案结果.单条包装列表)
+                {
+                    结果.AppendLine($"包装名称: {包装名称}");
+                    结果.AppendLine($"物料码: {物料码}");
+                    结果.AppendLine($"序号: {序号}");
+                    结果.AppendLine($"  灯带长度: {灯带长度:F2}m");
+                    结果.AppendLine($"  线材长度: {线材长度:F2}m");
+                    结果.AppendLine($"  标签码1: {标签码1}");
+                    结果.AppendLine($"  标签码2: {标签码2}");
+                    结果.AppendLine($"  标签码3: {标签码3}");
+                    结果.AppendLine($"  标签码4: {标签码4}");
+                    结果.AppendLine("----------------------------------------");
+                }
+            }
+
+            保存日志(结果.ToString(), "不同标签码2不能混装方案结果", Path.GetFileName(当前处理文件名));
+
+            string outputDirectory = Path.Combine(Application.StartupPath, "输出结果", 变量.订单编号);
+            if (!Directory.Exists(outputDirectory))
+            {
+                Directory.CreateDirectory(outputDirectory);
+            }
+
+            string outputFilePath = Path.Combine(outputDirectory, "不同标签码2不能混装_" + Path.GetFileName(当前处理文件名));
+            using (ExcelPackage package = new ExcelPackage(new FileInfo(outputFilePath)))
+            {
+                int 包装序号 = 1;
+
+                foreach (var 包装 in 方案结果.多条包装列表)
+                {
+                    ExcelWorksheet worksheet = package.Workbook.Worksheets.Add($"第{包装序号}盒");
+
+                    worksheet.Cells[1, 1].Value = "序号";
+                    worksheet.Cells[1, 2].Value = "条数";
+                    worksheet.Cells[1, 3].Value = "米数";
+                    worksheet.Cells[1, 4].Value = "标签码1";
+                    worksheet.Cells[1, 5].Value = "标签码2";
+                    worksheet.Cells[1, 6].Value = "标签码3";
+                    worksheet.Cells[1, 7].Value = "标签码4";
+                    worksheet.Cells[1, 8].Value = "线长";
+                    worksheet.Cells[1, 9].Value = "包装编码";
+                    worksheet.Cells[1, 13].Value = "客户型号";
+                    worksheet.Cells[1, 14].Value = "标签显示长度";
+
+                    int row = 2;
+                    foreach (var 灯带 in 包装.包含灯带)
+                    {
+                        worksheet.Cells[row, 1].Value = 灯带.序号;
+                        worksheet.Cells[row, 2].Value = 1;
+                        worksheet.Cells[row, 3].Value = Math.Round(灯带.灯带长度, 3);
+                        worksheet.Cells[row, 4].Value = 灯带.标签码1;
+                        worksheet.Cells[row, 5].Value = 灯带.标签码2;
+                        worksheet.Cells[row, 6].Value = 灯带.标签码3;
+                        worksheet.Cells[row, 7].Value = 灯带.标签码4;
+                        worksheet.Cells[row, 8].Value = Math.Round(灯带.线材长度, 3);
+                        worksheet.Cells[row, 9].Value = 包装.物料码;
+                        worksheet.Cells[row, 13].Value = 灯带.客户型号;
+                        worksheet.Cells[row, 14].Value = 灯带.标签显示长度;
+
+                        using (var range = worksheet.Cells[row, 1, row, 9])
+                        {
+                            range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                        }
+
+                        row++;
+                    }
+
+                    包装序号++;
+                }
+
+                foreach (var 包装 in 方案结果.单条包装列表)
+                {
+                    ExcelWorksheet worksheet = package.Workbook.Worksheets.Add($"第{包装序号}盒");
+
+                    worksheet.Cells[1, 1].Value = "序号";
+                    worksheet.Cells[1, 2].Value = "条数";
+                    worksheet.Cells[1, 3].Value = "米数";
+                    worksheet.Cells[1, 4].Value = "标签码1";
+                    worksheet.Cells[1, 5].Value = "标签码2";
+                    worksheet.Cells[1, 6].Value = "标签码3";
+                    worksheet.Cells[1, 7].Value = "标签码4";
+                    worksheet.Cells[1, 8].Value = "线长";
+                    worksheet.Cells[1, 9].Value = "包装编码";
+                    worksheet.Cells[1, 13].Value = "客户型号";
+                    worksheet.Cells[1, 14].Value = "标签显示长度";
+
+                    worksheet.Cells[2, 1].Value = 包装.序号;
+                    worksheet.Cells[2, 2].Value = 1;
+                    worksheet.Cells[2, 3].Value = Math.Round(包装.灯带长度, 3);
+                    worksheet.Cells[2, 4].Value = 包装.标签码1;
+                    worksheet.Cells[2, 5].Value = 包装.标签码2;
+                    worksheet.Cells[2, 6].Value = 包装.标签码3;
+                    worksheet.Cells[2, 7].Value = 包装.标签码4;
+                    worksheet.Cells[2, 8].Value = Math.Round(包装.线材长度, 3);
+                    worksheet.Cells[2, 9].Value = 包装.物料码;
+                    worksheet.Cells[2, 13].Value = 包装.客户型号;
+                    worksheet.Cells[2, 14].Value = 包装.标签显示长度;
+
+                    using (var range = worksheet.Cells[2, 1, 2, 9])
+                    {
+                        range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                    }
+
+                    包装序号++;
+                }
+
+                package.Save();
+            }
+
+            // 创建包装方案对象，用于生成流转单
+            包装方案 选定方案 = new 包装方案
+            {
+                多条包装列表 = 方案结果.多条包装列表,
+                单条包装列表 = 方案结果.单条包装列表,
+                方案名称 = "不同标签码2不能混装方案"
+            };
+
+            // 生成包装材料需求流转单
+            生成包装材料需求流转单_4(outputDirectory, "不同标签码2不能混装_" + Path.GetFileName(当前处理文件名), 选定方案);
+
+            uiTextBox_状态.AppendText($"不同标签码2不能混装方案已生成，共需要{方案包装数}个包装。" + Environment.NewLine);
+            uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
+        }
+
+        private (List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表,
+          List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表)
+ 执行不同标签码2不能混装方案(List<包装数据> 匹配包装列表, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 长度列表, string 型号)
+        {
+            var 非Luminii包装列表 = 匹配包装列表.Where(p => !p.包装名称.Contains("Luminii")).ToList();
+
+            var 多条包装列表 = new List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)>();
+            var 单条包装列表 = new List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>();
+
+            var 四七零包装 = 非Luminii包装列表.FirstOrDefault(p => p.包装名称?.Contains("470") == true &&
+                (p.包装类型?.Contains("多条") == true || p.包装类型?.Contains("2条") == true || p.包装类型?.Contains("3条") == true));
+            var 六百包装 = 非Luminii包装列表.FirstOrDefault(p => p.包装名称?.Contains("600") == true &&
+                (p.包装类型?.Contains("多条") == true || p.包装类型?.Contains("2条") == true || p.包装类型?.Contains("3条") == true));
+
+            var 单条包装列表数据 = 非Luminii包装列表
+                .Where(p => p.包装类型?.Contains("单条") == true)
+                .OrderBy(p =>
+                {
+                    if (p.包装名称?.Contains("330") == true) return 1;
+                    if (p.包装名称?.Contains("470") == true) return 2;
+                    if (p.包装名称?.Contains("600") == true) return 3;
+                    return 4;
+                })
+                .ToList();
+
+            if (四七零包装 == null && 六百包装 == null)
+            {
+                MessageBox.Show("未找到合适的多条包装方案", "提示");
+                return (多条包装列表, 单条包装列表);
+            }
+
+            double 权重值 = uiTextBox_权重值.Text.ToDouble();
+
+            var 标签码2分组 = 长度列表.GroupBy(x => x.标签码2).ToList();
+
+            foreach (var 组 in 标签码2分组)
+            {
+                var 待处理灯带 = 组.ToList();
+                string 当前标签码2 = 待处理灯带[0].标签码2;
+
+                while (待处理灯带.Any())
+                {
+                    var 当前组 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)>();
+                    double current灯带米数 = 0;
+                    double current线材长度 = 0;
+
+                    var 第一个灯带 = 待处理灯带[0];
+                    当前组.Add(第一个灯带);
+                    current灯带米数 = 第一个灯带.灯带长度;
+                    current线材长度 = 第一个灯带.线材长度;
+                    待处理灯带.RemoveAt(0);
+
+                    int 最大迭代次数 = 1000;
+                    int 当前迭代 = 0;
+
+                    while (待处理灯带.Any() && 当前迭代 < 最大迭代次数)
+                    {
+                        当前迭代++;
+                        var 下一个灯带 = 待处理灯带[0];
+                        if (下一个灯带.标签码2 != 当前标签码2)
+                        {
+                            break;
+                        }
+                        double 预计累计灯带米数 = current灯带米数 + 下一个灯带.灯带长度;
+                        double 预计累计线材长度 = current线材长度 + 下一个灯带.线材长度;
+                        var 当前灯带组 = 当前组.Concat(new[] { 下一个灯带 }).ToList();
+
+                        bool 可以用470 = 四七零包装 != null && 检查包装是否可用(四七零包装, 型号, 预计累计灯带米数, 预计累计线材长度, 权重值, 当前灯带组);
+                        bool 可以用600 = 六百包装 != null && 检查包装是否可用(六百包装, 型号, 预计累计灯带米数, 预计累计线材长度, 权重值, 当前灯带组);
+
+                        if (可以用470 || 可以用600)
+                        {
+                            当前组.Add(下一个灯带);
+                            current灯带米数 = 预计累计灯带米数;
+                            current线材长度 = 预计累计线材长度;
+                            待处理灯带.RemoveAt(0);
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+
+                    if (当前组.Count == 1)
+                    {
+                        bool 找到单条包装 = false;
+                        foreach (var 包装 in 单条包装列表数据)
+                        {
+                            var 单条产品信息 = 包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+                            if (单条产品信息 == null) continue;
+                            var 灯带 = 当前组[0];
+                            var 单条灯带列表 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> { 灯带 };
+                            bool 忽略线长限制 = !需要计算线长(单条灯带列表);
+                            if (灯带.灯带长度 <= 单条产品信息.灯带最大长度 &&
+                                灯带.灯带长度 >= 单条产品信息.最低阈值 &&
+                                (忽略线长限制 || 灯带.线材长度 <= 单条产品信息.线材最大长度))
+                            {
+                                单条包装列表.Add((包装.包装名称, 包装.物料码, 灯带.序号, 灯带.灯带长度, 灯带.线材长度, 灯带.标签码1, 灯带.标签码2, 灯带.标签码3, 灯带.标签码4, 灯带.客户型号, 灯带.标签显示长度));
+                                找到单条包装 = true;
+                                break;
+                            }
+                        }
+                        if (!找到单条包装)
+                        {
+                            bool 可以用470单条 = false;
+                            if (四七零包装 != null)
+                            {
+                                var 单条灯带列表 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> { 当前组[0] };
+                                可以用470单条 = 检查包装是否可用(四七零包装, 型号, 当前组[0].灯带长度, 当前组[0].线材长度, 权重值, 单条灯带列表);
+                                if (可以用470单条)
+                                {
+                                    多条包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 当前组));
+                                }
+                            }
+                            if (!可以用470单条 && 六百包装 != null)
+                            {
+                                var 单条灯带列表 = new List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> { 当前组[0] };
+                                bool 可以用600单条 = 检查包装是否可用(六百包装, 型号, 当前组[0].灯带长度, 当前组[0].线材长度, 权重值, 单条灯带列表);
+                                if (可以用600单条)
+                                {
+                                    多条包装列表.Add((六百包装.包装名称, 六百包装.物料码, 当前组));
+                                }
+                                else
+                                {
+                                    throw new Exception($"无法找到合适的包装方案处理灯带 {当前组[0].序号}");
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        bool 可以用470多条 = false;
+                        if (四七零包装 != null)
+                        {
+                            可以用470多条 = 检查包装是否可用(四七零包装, 型号, current灯带米数, current线材长度, 权重值, 当前组);
+                        }
+                        if (可以用470多条)
+                        {
+                            多条包装列表.Add((四七零包装.包装名称, 四七零包装.物料码, 当前组));
+                        }
+                        else if (六百包装 != null)
+                        {
+                            bool 可以用600多条 = 检查包装是否可用(六百包装, 型号, current灯带米数, current线材长度, 权重值, 当前组);
+                            if (可以用600多条)
+                            {
+                                多条包装列表.Add((六百包装.包装名称, 六百包装.物料码, 当前组));
+                            }
+                            else
+                            {
+                                throw new Exception("无法找到合适的多条包装");
+                            }
+                        }
+                        else
+                        {
+                            throw new Exception("无法找到合适的多条包装");
+                        }
+                    }
+                }
+            }
+            return (多条包装列表, 单条包装列表);
+        }
+
+        private bool 需要计算线长(List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 灯带列表)
+        {
+            if (灯带列表.Count > 4) return true;  // 超过4条需要计算
+            return 灯带列表.Any(x => x.线材长度 > 5.0);  // 有任何一条超过5米需要计算
+        }
+
+        private bool 检查包装是否可用(包装数据 包装, string 型号, double 预计累计灯带米数, double 预计累计线材长度, double 权重值, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 当前灯带组)
+        {
+            var 产品信息 = 包装.支持产品型号列表?.FirstOrDefault(p => p.产品型号 == 型号);
+            if (产品信息 == null) return false;
+
+            double 最大灯带米数 = 产品信息.灯带最大长度;
+            double 最大线材长度 = 产品信息.线材最大长度;
+
+            double 累计灯带权重系数 = 预计累计灯带米数 / 最大灯带米数;
+            double 累计线材权重系数 = 预计累计线材长度 / 最大线材长度;
+
+            double 调整后最大线材长度 = 最大线材长度 * (1 - 累计灯带权重系数 * 权重值);
+            double 调整后最大灯带米数 = 最大灯带米数 * (1 - 累计线材权重系数 * 权重值);
+
+            bool 忽略线长限制 = !需要计算线长(当前灯带组);
+
+            return 预计累计灯带米数 <= 调整后最大灯带米数 &&
+                   (忽略线长限制 || 预计累计线材长度 <= 调整后最大线材长度);
+        }
+
         private void 显示方案比较结果_2(
-(List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度)> 包含灯带)> 多条包装列表,
- List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度)> 单条包装列表) 方案一,
-(List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度)> 包含灯带)> 多条包装列表,
- List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度)> 单条包装列表) 方案二,
-(List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度)> 包含灯带)> 多条包装列表,
- List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度)> 单条包装列表) 节约方案)
+(List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表,
+ List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表) 方案一,
+(List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表,
+ List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表) 方案二,
+(List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表,
+ List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表) 节约方案)
         {
             int 方案一包装数 = 方案一.多条包装列表.Count + 方案一.单条包装列表.Count;
             int 方案二包装数 = 方案二.多条包装列表.Count + 方案二.单条包装列表.Count;
@@ -1984,10 +4619,10 @@ namespace 包装计算
             保存日志(比较结果.ToString(), "包装方案比较结果", Path.GetFileName(当前处理文件名));
 
             // 确定最优方案用于后续处理
-            
-            var 最优方案 = 最优方案包装数 == 方案一包装数 ? 方案一 :
-                           最优方案包装数 == 方案二包装数 ? 方案二 : 节约方案;
 
+            //常规方案
+            var 最优方案 = 最优方案包装数 == 方案一包装数 ? 方案一 :
+           最优方案包装数 == 方案二包装数 ? 方案二 : 节约方案;
 
             // 创建Excel文件(最优方案组合结果EXCEL)
             string 文件夹路径 = Path.Combine(Application.StartupPath, "输出结果", 变量.订单编号);
@@ -2012,20 +4647,38 @@ namespace 包装计算
                     worksheet.Cells[1, 3].Value = "米数";
                     worksheet.Cells[1, 4].Value = "标签码1";
                     worksheet.Cells[1, 5].Value = "标签码2";
-                    worksheet.Cells[1, 6].Value = "实际剪切长度";
-                    worksheet.Cells[1, 7].Value = "实际剪切长度/米";
+                    worksheet.Cells[1, 6].Value = "标签码3";
+                    worksheet.Cells[1, 7].Value = "标签码4";
                     worksheet.Cells[1, 8].Value = "线长";
                     worksheet.Cells[1, 9].Value = "包装编码";
+                    worksheet.Cells[1, 13].Value = "客户型号"; // 新增
+                    worksheet.Cells[1, 14].Value = "标签显示长度";
 
                     // 填充数据
                     int row = 2;
                     foreach (var 灯带 in 包装.包含灯带)
                     {
-                        worksheet.Cells[row, 1].Value = 灯带.序号;  // 直接使用原始序号
+                        worksheet.Cells[row, 1].Value = 灯带.序号;
                         worksheet.Cells[row, 2].Value = 1;
                         worksheet.Cells[row, 3].Value = Math.Round(灯带.灯带长度, 3);
+                        worksheet.Cells[row, 4].Value = 灯带.标签码1;
+                        worksheet.Cells[row, 5].Value = 灯带.标签码2;
+                        worksheet.Cells[row, 6].Value = 灯带.标签码3;
+                        worksheet.Cells[row, 7].Value = 灯带.标签码4;
                         worksheet.Cells[row, 8].Value = Math.Round(灯带.线材长度, 3);
                         worksheet.Cells[row, 9].Value = 包装.物料码;
+                        worksheet.Cells[row, 13].Value = 灯带.客户型号; // 新增
+                        worksheet.Cells[row, 14].Value = 灯带.标签显示长度;
+
+                        // 设置单元格样式
+                        using (var range = worksheet.Cells[row, 1, row, 14])
+                        {
+                            range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                            range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                        }
+
                         row++;
                     }
 
@@ -2043,24 +4696,39 @@ namespace 包装计算
                     worksheet.Cells[1, 3].Value = "米数";
                     worksheet.Cells[1, 4].Value = "标签码1";
                     worksheet.Cells[1, 5].Value = "标签码2";
-                    worksheet.Cells[1, 6].Value = "实际剪切长度";
-                    worksheet.Cells[1, 7].Value = "实际剪切长度/米";
+                    worksheet.Cells[1, 6].Value = "标签码3";
+                    worksheet.Cells[1, 7].Value = "标签码4";
                     worksheet.Cells[1, 8].Value = "线长";
                     worksheet.Cells[1, 9].Value = "包装编码";
+                    worksheet.Cells[1, 13].Value = "客户型号";
+                    worksheet.Cells[1, 14].Value = "标签显示长度";
 
                     // 填充单条包装数据
-                    worksheet.Cells[2, 1].Value = 包装.序号;  // 直接使用原始序号
+                    worksheet.Cells[2, 1].Value = 包装.序号;
                     worksheet.Cells[2, 2].Value = 1;
                     worksheet.Cells[2, 3].Value = Math.Round(包装.灯带长度, 3);
+                    worksheet.Cells[2, 4].Value = 包装.标签码1;
+                    worksheet.Cells[2, 5].Value = 包装.标签码2;
+                    worksheet.Cells[2, 6].Value = 包装.标签码3;
+                    worksheet.Cells[2, 7].Value = 包装.标签码4;
                     worksheet.Cells[2, 8].Value = Math.Round(包装.线材长度, 3);
                     worksheet.Cells[2, 9].Value = 包装.物料码;
+                    worksheet.Cells[2, 13].Value = 包装.客户型号;
+                    worksheet.Cells[2, 14].Value = 包装.标签显示长度;
+
+                    // 设置单元格样式
+                    using (var range = worksheet.Cells[2, 1, 2, 14])
+                    {
+                        range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                        range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                    }
 
                     包装序号++;
                 }
 
                 package.Save();
-
-
             }
 
             包装方案 选定方案 = new 包装方案
@@ -2069,20 +4737,17 @@ namespace 包装计算
                 单条包装列表 = 最优方案.单条包装列表
             };
             生成包装材料需求流转单_4(文件夹路径, 当前处理文件名, 选定方案);
-
-            
-
         }
 
         private void 显示包装方案详情_3(StringBuilder sb,
-(List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度)> 包含灯带)> 多条包装列表,
- List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度)> 单条包装列表) 方案)
+(List<(string 包装名称, string 物料码, List<(string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 包含灯带)> 多条包装列表,
+ List<(string 包装名称, string 物料码, string 序号, double 灯带长度, double 线材长度, string 标签码1, string 标签码2, string 标签码3, string 标签码4, string 客户型号, string 标签显示长度)> 单条包装列表) 方案)
         {
             // 显示单条包装
             if (方案.单条包装列表.Count > 0)
             {
                 sb.AppendLine("\n单条包装：");
-                foreach (var (包装名称, 物料码, 序号, 灯带长度, 线材长度) in 方案.单条包装列表)
+                foreach (var (包装名称, 物料码, 序号, 灯带长度, 线材长度, 标签码1, 标签码2, 标签码3, 标签码4, 客户型号, 标签显示长度) in 方案.单条包装列表)
                 {
                     sb.AppendLine($"包装名称: {包装名称}");
                     sb.AppendLine($"物料码: {物料码}");
@@ -2105,7 +4770,7 @@ namespace 包装计算
                     double 包装内总灯带长度 = 0;
                     double 包装内总线材长度 = 0;
 
-                    foreach (var (序号, 灯带长度, 线材长度) in 包含灯带)
+                    foreach (var (序号, 灯带长度, 线材长度, 标签码1, 标签码2, 标签码3, 标签码4, 客户型号, 标签显示长度) in 包含灯带)
                     {
                         sb.AppendLine($"  序号: {序号}");
                         sb.AppendLine($"    灯带长度: {灯带长度:F2}m");
@@ -2119,7 +4784,6 @@ namespace 包装计算
                 }
             }
         }
-
 
         private void 生成包装材料需求流转单_4(string 文件夹路径, string 当前处理文件名, 包装方案 最优方案)
         {
@@ -2155,7 +4819,6 @@ namespace 包装计算
                     包装物料码统计[包装.物料码]++;
                 }
             }
-
 
             using (ExcelPackage 汇总包 = new ExcelPackage(汇总文件信息))
             {
@@ -2295,7 +4958,6 @@ namespace 包装计算
                 int currentRow = 汇总表.Dimension?.End.Row ?? 6;
                 currentRow++;
 
-
                 // 遍历每个包装物料码，获取对应的包装数据
                 foreach (var kvp in 包装物料码统计)
                 {
@@ -2325,24 +4987,28 @@ namespace 包装计算
 
                         currentRow++;
 
-                        // 添加POF热缩袋信息
-                        if (!string.IsNullOrEmpty(包装数据.POF热缩袋))
+                        if (变量.客户代码.Contains("13013") || 变量.客户代码.Contains("12056")) { }
+                        else
                         {
-                            汇总表.Cells[currentRow, 1].Value = "";
-                            汇总表.Cells[currentRow, 2].Value = "POF热缩袋";
-                            汇总表.Cells[currentRow, 3].Value = 包装数据.POF热缩袋;
-                            汇总表.Cells[currentRow, 4].Value = 包装数据.POF热缩袋_系统尺寸;
-                            汇总表.Cells[currentRow, 5].Value = 使用数量;
-                            汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.POF热缩袋);
-                            汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+                            // 添加POF热缩袋信息
+                            if (!string.IsNullOrEmpty(包装数据.POF热缩袋))
+                            {
+                                汇总表.Cells[currentRow, 1].Value = "";
+                                汇总表.Cells[currentRow, 2].Value = "POF热缩袋";
+                                汇总表.Cells[currentRow, 3].Value = 包装数据.POF热缩袋;
+                                汇总表.Cells[currentRow, 4].Value = 包装数据.POF热缩袋_系统尺寸;
+                                汇总表.Cells[currentRow, 5].Value = 使用数量;
+                                汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.POF热缩袋);
+                                汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
 
-                            dataRange = 汇总表.Cells[currentRow, 1, currentRow, 9];
-                            dataRange.Style.Border.Top.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
-                            dataRange.Style.Border.Left.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
-                            dataRange.Style.Border.Right.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
-                            dataRange.Style.Border.Bottom.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                                dataRange = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                                dataRange.Style.Border.Top.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                                dataRange.Style.Border.Left.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                                dataRange.Style.Border.Right.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                                dataRange.Style.Border.Bottom.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
 
-                            currentRow++;
+                                currentRow++;
+                            }
                         }
 
                         // 添加全棉织带信息
@@ -2365,6 +5031,31 @@ namespace 包装计算
                             currentRow++;
                         }
 
+                        //添加通口箱信息
+                        // 判断是否是Luminii客户方案
+                        bool 是Luminii客户 = 当前处理文件名.StartsWith("Luminii_") || 变量.客户代码.Contains("17034");
+
+                        // 如果是Luminii客户，先添加通口箱信息
+                        if (是Luminii客户)
+                        {   //MessageBox.Show(包装数据.通口箱);
+                            汇总表.Cells[currentRow, 1].Value = "";
+                            汇总表.Cells[currentRow, 2].Value = "通口箱";
+                            汇总表.Cells[currentRow, 3].Value = 包装数据.通口箱;
+                            汇总表.Cells[currentRow, 4].Value = 包装数据.通口箱尺寸;
+                            汇总表.Cells[currentRow, 5].Value = 使用数量;
+                            汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.通口箱);
+                            汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+
+                            var dataRange2 = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                            dataRange2.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                            dataRange2.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                            dataRange2.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                            dataRange2.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                            dataRange2.Style.Fill.PatternType = ExcelFillStyle.Solid;
+                            dataRange2.Style.Fill.BackgroundColor.SetColor(Color.LightGreen);
+
+                            currentRow++;
+                        }
 
                         // 从文件名获取当前型号
                         string 当前型号 = "";
@@ -2377,135 +5068,404 @@ namespace 包装计算
                             }
                         }
 
-                        // 添加纸箱信息
-                        // 计算总盒数（多条包装数量 + 单条包装数量）
-                        int 总盒数 = 0;
-                        if (包装物料码统计.ContainsKey(物料码))
+                        //// 添加纸箱信息 2025.5.13之前的旧的，可以正常使用
+                        //// 计算总盒数（多条包装数量 + 单条包装数量）
+                        //int 总盒数 = 使用数量;
+                        //// 获取支持的最大盒数
+                        //int 最大支持盒数 = 0;
+                        //// 从包装数据中查找对应的产品型号信息
+                        //var 产品型号信息 = 包装数据.支持产品型号列表.FirstOrDefault(x => x.产品型号 == 当前型号);
+                        //if (产品型号信息 != null && !string.IsNullOrEmpty(产品型号信息.支持的盒装外箱))
+                        //{
+                        //    if (产品型号信息.支持的盒装外箱.Contains("五盒装"))  // 添加五盒装的判断
+                        //        最大支持盒数 = 5;
+                        //    else if (产品型号信息.支持的盒装外箱.Contains("三盒装"))
+                        //        最大支持盒数 = 3;
+                        //    else if (产品型号信息.支持的盒装外箱.Contains("二盒装"))
+                        //        最大支持盒数 = 2;
+                        //    else if (产品型号信息.支持的盒装外箱.Contains("单盒装"))
+                        //        最大支持盒数 = 1;
+                        //}
+
+                        //int 剩余盒数 = 总盒数;  // 使用计算出的总盒数
+
+                        //// 优先使用单盒装，如果总盒数为1
+                        //if (总盒数 == 1 && 最大支持盒数 >= 1 && !string.IsNullOrEmpty(包装数据.单盒装外箱))
+                        //{
+                        //    汇总表.Cells[currentRow, 1].Value = "";
+                        //    汇总表.Cells[currentRow, 2].Value = "纸箱";
+                        //    汇总表.Cells[currentRow, 3].Value = 包装数据.单盒装外箱;
+                        //    汇总表.Cells[currentRow, 4].Value = 包装数据.单盒装尺寸;
+                        //    汇总表.Cells[currentRow, 5].Value = 1;
+                        //    汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.单盒装外箱);
+                        //    汇总表.Cells[currentRow, 9].Value = "1盒装标准";
+                        //    汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+
+                        //    var range = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                        //    range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                        //    range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                        //    range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                        //    range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+
+                        //    currentRow++;
+                        //    剩余盒数 = 0;
+                        //}
+                        //// 如果总盒数大于1，则按照最优组合方式处理
+                        //else
+                        //{
+                        //    // 处理五盒装
+                        //    if (最大支持盒数 >= 5 && !string.IsNullOrEmpty(包装数据.五盒装外箱) && 剩余盒数 >= 5)
+                        //    {
+                        //        int 五盒装数量 = 剩余盒数 / 5;
+
+                        //        汇总表.Cells[currentRow, 1].Value = "";
+                        //        汇总表.Cells[currentRow, 2].Value = "纸箱";
+                        //        汇总表.Cells[currentRow, 3].Value = 包装数据.五盒装外箱;
+                        //        汇总表.Cells[currentRow, 4].Value = 包装数据.五盒装尺寸;
+                        //        汇总表.Cells[currentRow, 5].Value = 五盒装数量;
+                        //        汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.五盒装外箱);
+                        //        汇总表.Cells[currentRow, 9].Value = "5盒装标准";
+                        //        汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+
+                        //        var range = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                        //        range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                        //        range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                        //        range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                        //        range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+
+                        //        currentRow++;
+                        //        剩余盒数 %= 5;
+                        //    }
+
+                        //    // 处理三盒装
+                        //    if (最大支持盒数 >= 3 && !string.IsNullOrEmpty(包装数据.三盒装外箱) && 剩余盒数 >= 3)
+                        //    {
+                        //        int 三盒装数量 = 剩余盒数 / 3;
+
+                        //        汇总表.Cells[currentRow, 1].Value = "";
+                        //        汇总表.Cells[currentRow, 2].Value = "纸箱";
+                        //        汇总表.Cells[currentRow, 3].Value = 包装数据.三盒装外箱;
+                        //        汇总表.Cells[currentRow, 4].Value = 包装数据.三盒装尺寸;
+                        //        汇总表.Cells[currentRow, 5].Value = 三盒装数量;
+                        //        汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.三盒装外箱);
+                        //        汇总表.Cells[currentRow, 9].Value = "3盒装标准";
+                        //        汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+
+                        //        var range = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                        //        range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                        //        range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                        //        range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                        //        range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+
+                        //        currentRow++;
+                        //        剩余盒数 %= 3;
+                        //    }
+
+                        //    // 处理二盒装
+                        //    if (最大支持盒数 >= 2 && !string.IsNullOrEmpty(包装数据.二盒装外箱) && 剩余盒数 >= 2)
+                        //    {
+                        //        int 二盒装数量 = 剩余盒数 / 2;
+
+                        //        汇总表.Cells[currentRow, 1].Value = "";
+                        //        汇总表.Cells[currentRow, 2].Value = "纸箱";
+                        //        汇总表.Cells[currentRow, 3].Value = 包装数据.二盒装外箱;
+                        //        汇总表.Cells[currentRow, 4].Value = 包装数据.二盒装尺寸;
+                        //        汇总表.Cells[currentRow, 5].Value = 二盒装数量;
+                        //        汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.二盒装外箱);
+                        //        汇总表.Cells[currentRow, 9].Value = "2盒装标准";
+                        //        汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+
+                        //        var range = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                        //        range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                        //        range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                        //        range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                        //        range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+
+                        //        currentRow++;
+                        //        剩余盒数 %= 2;
+                        //    }
+
+                        //    // 处理单盒装
+                        //    if (最大支持盒数 >= 1 && !string.IsNullOrEmpty(包装数据.单盒装外箱) && 剩余盒数 > 0)
+                        //    {
+                        //        汇总表.Cells[currentRow, 1].Value = "";
+                        //        汇总表.Cells[currentRow, 2].Value = "纸箱";
+                        //        汇总表.Cells[currentRow, 3].Value = 包装数据.单盒装外箱;
+                        //        汇总表.Cells[currentRow, 4].Value = 包装数据.单盒装尺寸;
+                        //        汇总表.Cells[currentRow, 5].Value = 剩余盒数;
+                        //        汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.单盒装外箱);
+                        //        汇总表.Cells[currentRow, 9].Value = "1盒装标准";
+                        //        汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+
+                        //        var range = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                        //        range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                        //        range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                        //        range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                        //        range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+
+                        //        currentRow++;
+                        //    }
+                        //}
+
+                        if (算法选择.Text == "不同标签码1不能混装(且外箱不能混装)")
                         {
-                            总盒数 += 包装物料码统计[物料码];  // 多条包装的数量
-                        }
-                        // 计算单条包装中使用该物料码的数量
-                        int 单条包装数量 = 最优方案.单条包装列表.Count(x => x.物料码 == 物料码);
-                        总盒数 += 单条包装数量;
+                            // 1. 收集所有“盒子”对象（多条包装和单条包装），每个盒子是一个整体
+                            var allBoxes = new List<(string 物料码, string 标签码1)>();
+                            foreach (var 包装 in 最优方案.多条包装列表)
+                                foreach (var 明细 in 包装.包含灯带)
+                                    allBoxes.Add((包装.物料码, 明细.标签码1));
+                            foreach (var 包装 in 最优方案.单条包装列表)
+                                allBoxes.Add((包装.物料码, 包装.标签码1));
 
-                        // 获取支持的最大盒数
-                        int 最大支持盒数 = 0;
-                        // 从包装数据中查找对应的产品型号信息
-                        var 产品型号信息 = 包装数据.支持产品型号列表.FirstOrDefault(x => x.产品型号 == 当前型号);
-                        if (产品型号信息 != null && !string.IsNullOrEmpty(产品型号信息.支持的盒装外箱))
+                            // 2. 只在这里输出一次“半成品BOM物料码”及相关材料
+                            foreach (var 物料分组 in allBoxes.GroupBy(x => x.物料码))
+                            {
+                                物料码 = 物料分组.Key;
+                                if (!包装数据字典.TryGetValue(物料码, out 包装数据)) continue;
+
+                                // 只输出一次“半成品BOM物料码”，数量=该物料码下所有盒子的总数
+                                int 总盒数 = 物料分组.Count();
+                                汇总表.Cells[currentRow, 2].Value = "半成品BOM物料码";
+                                汇总表.Cells[currentRow, 3].Value = 物料码;
+                                汇总表.Cells[currentRow, 4].Value = 包装数据.包装名称;
+                                汇总表.Cells[currentRow, 5].Value = 总盒数;
+                                汇总表.Cells[currentRow, 6].Value = 获取仓位(物料码);
+                                汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+                                currentRow++;
+
+                                // 输出POF热缩袋（如有）
+                                if (!string.IsNullOrEmpty(包装数据.POF热缩袋))
+                                {
+                                    汇总表.Cells[currentRow, 2].Value = "POF热缩袋";
+                                    汇总表.Cells[currentRow, 3].Value = 包装数据.POF热缩袋;
+                                    汇总表.Cells[currentRow, 4].Value = 包装数据.POF热缩袋_系统尺寸;
+                                    汇总表.Cells[currentRow, 5].Value = 总盒数;
+                                    汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.POF热缩袋);
+                                    汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+                                    currentRow++;
+                                }
+                                // ...全棉织带、通口箱同理...
+
+                                // 3. 输出所有纸箱（按标签码1分组、再分配箱型）
+                                foreach (var 标签分组 in 物料分组.GroupBy(x => x.标签码1))
+                                {
+                                    string 当前标签码1 = 标签分组.Key;
+                                    int 盒子总数 = 标签分组.Count();
+                                    int 最大支持盒数 = 0;
+                                    var 产品型号信息 = 包装数据.支持产品型号列表.FirstOrDefault(x => x.产品型号 == 当前型号);
+                                    if (产品型号信息 != null && !string.IsNullOrEmpty(产品型号信息.支持的盒装外箱))
+                                    {
+                                        if (产品型号信息.支持的盒装外箱.Contains("五盒装")) 最大支持盒数 = 5;
+                                        else if (产品型号信息.支持的盒装外箱.Contains("三盒装")) 最大支持盒数 = 3;
+                                        else if (产品型号信息.支持的盒装外箱.Contains("二盒装")) 最大支持盒数 = 2;
+                                        else if (产品型号信息.支持的盒装外箱.Contains("单盒装")) 最大支持盒数 = 1;
+                                    }
+                                    int 剩余盒数 = 盒子总数;
+
+                                    // 五盒装
+                                    while (最大支持盒数 >= 5 && !string.IsNullOrEmpty(包装数据.五盒装外箱) && 剩余盒数 >= 5)
+                                    {
+                                        汇总表.Cells[currentRow, 2].Value = "纸箱";
+                                        汇总表.Cells[currentRow, 3].Value = 包装数据.五盒装外箱;
+                                        汇总表.Cells[currentRow, 4].Value = 包装数据.五盒装尺寸;
+                                        汇总表.Cells[currentRow, 5].Value = 1;
+                                        汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.五盒装外箱);
+                                        汇总表.Cells[currentRow, 9].Value = "5盒装标准";
+                                        汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+                                        汇总表.Cells[currentRow, 12].Value = 当前标签码1;
+                                        currentRow++;
+                                        剩余盒数 -= 5;
+                                    }
+                                    // 三盒装
+                                    while (最大支持盒数 >= 3 && !string.IsNullOrEmpty(包装数据.三盒装外箱) && 剩余盒数 >= 3)
+                                    {
+                                        汇总表.Cells[currentRow, 2].Value = "纸箱";
+                                        汇总表.Cells[currentRow, 3].Value = 包装数据.三盒装外箱;
+                                        汇总表.Cells[currentRow, 4].Value = 包装数据.三盒装尺寸;
+                                        汇总表.Cells[currentRow, 5].Value = 1;
+                                        汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.三盒装外箱);
+                                        汇总表.Cells[currentRow, 9].Value = "3盒装标准";
+                                        汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+                                        汇总表.Cells[currentRow, 12].Value = 当前标签码1;
+                                        currentRow++;
+                                        剩余盒数 -= 3;
+                                    }
+                                    // 二盒装
+                                    while (最大支持盒数 >= 2 && !string.IsNullOrEmpty(包装数据.二盒装外箱) && 剩余盒数 >= 2)
+                                    {
+                                        汇总表.Cells[currentRow, 2].Value = "纸箱";
+                                        汇总表.Cells[currentRow, 3].Value = 包装数据.二盒装外箱;
+                                        汇总表.Cells[currentRow, 4].Value = 包装数据.二盒装尺寸;
+                                        汇总表.Cells[currentRow, 5].Value = 1;
+                                        汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.二盒装外箱);
+                                        汇总表.Cells[currentRow, 9].Value = "2盒装标准";
+                                        汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+                                        汇总表.Cells[currentRow, 12].Value = 当前标签码1;
+                                        currentRow++;
+                                        剩余盒数 -= 2;
+                                    }
+                                    // 单盒装
+                                    while (最大支持盒数 >= 1 && !string.IsNullOrEmpty(包装数据.单盒装外箱) && 剩余盒数 > 0)
+                                    {
+                                        汇总表.Cells[currentRow, 2].Value = "纸箱";
+                                        汇总表.Cells[currentRow, 3].Value = 包装数据.单盒装外箱;
+                                        汇总表.Cells[currentRow, 4].Value = 包装数据.单盒装尺寸;
+                                        汇总表.Cells[currentRow, 5].Value = 1;
+                                        汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.单盒装外箱);
+                                        汇总表.Cells[currentRow, 9].Value = "1盒装标准";
+                                        汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+                                        汇总表.Cells[currentRow, 12].Value = 当前标签码1;
+                                        currentRow++;
+                                        剩余盒数 -= 1;
+                                    }
+                                }
+                            }
+                        }
+                        else
                         {
-                            if (产品型号信息.支持的盒装外箱.Contains("五盒装"))  // 添加五盒装的判断
-                                最大支持盒数 = 5;
-                            else if (产品型号信息.支持的盒装外箱.Contains("三盒装"))
-                                最大支持盒数 = 3;
-                            else if (产品型号信息.支持的盒装外箱.Contains("二盒装"))
-                                最大支持盒数 = 2;
-                            else if (产品型号信息.支持的盒装外箱.Contains("单盒装"))
-                                最大支持盒数 = 1;
+                            int 总盒数 = 使用数量;
+                            // 获取支持的最大盒数
+                            int 最大支持盒数 = 0;
+                            // 从包装数据中查找对应的产品型号信息
+                            var 产品型号信息 = 包装数据.支持产品型号列表.FirstOrDefault(x => x.产品型号 == 当前型号);
+                            if (产品型号信息 != null && !string.IsNullOrEmpty(产品型号信息.支持的盒装外箱))
+                            {
+                                if (产品型号信息.支持的盒装外箱.Contains("五盒装"))  // 添加五盒装的判断
+                                    最大支持盒数 = 5;
+                                else if (产品型号信息.支持的盒装外箱.Contains("三盒装"))
+                                    最大支持盒数 = 3;
+                                else if (产品型号信息.支持的盒装外箱.Contains("二盒装"))
+                                    最大支持盒数 = 2;
+                                else if (产品型号信息.支持的盒装外箱.Contains("单盒装"))
+                                    最大支持盒数 = 1;
+                            }
+
+                            int 剩余盒数 = 总盒数;  // 使用计算出的总盒数
+
+                            // 优先使用单盒装，如果总盒数为1
+                            if (总盒数 == 1 && 最大支持盒数 >= 1 && !string.IsNullOrEmpty(包装数据.单盒装外箱))
+                            {
+                                汇总表.Cells[currentRow, 1].Value = "";
+                                汇总表.Cells[currentRow, 2].Value = "纸箱";
+                                汇总表.Cells[currentRow, 3].Value = 包装数据.单盒装外箱;
+                                汇总表.Cells[currentRow, 4].Value = 包装数据.单盒装尺寸;
+                                汇总表.Cells[currentRow, 5].Value = 1;
+                                汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.单盒装外箱);
+                                汇总表.Cells[currentRow, 9].Value = "1盒装标准";
+                                汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+
+                                var range = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                                range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                                range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                                range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                                range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+
+                                currentRow++;
+                                剩余盒数 = 0;
+                            }
+                            // 如果总盒数大于1，则按照最优组合方式处理
+                            else
+                            {
+                                // 处理五盒装
+                                if (最大支持盒数 >= 5 && !string.IsNullOrEmpty(包装数据.五盒装外箱) && 剩余盒数 >= 5)
+                                {
+                                    int 五盒装数量 = 剩余盒数 / 5;
+
+                                    汇总表.Cells[currentRow, 1].Value = "";
+                                    汇总表.Cells[currentRow, 2].Value = "纸箱";
+                                    汇总表.Cells[currentRow, 3].Value = 包装数据.五盒装外箱;
+                                    汇总表.Cells[currentRow, 4].Value = 包装数据.五盒装尺寸;
+                                    汇总表.Cells[currentRow, 5].Value = 五盒装数量;
+                                    汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.五盒装外箱);
+                                    汇总表.Cells[currentRow, 9].Value = "5盒装标准";
+                                    汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+
+                                    var range = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                                    range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                                    range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                                    range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                                    range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+
+                                    currentRow++;
+                                    剩余盒数 %= 5;
+                                }
+
+                                // 处理三盒装
+                                if (最大支持盒数 >= 3 && !string.IsNullOrEmpty(包装数据.三盒装外箱) && 剩余盒数 >= 3)
+                                {
+                                    int 三盒装数量 = 剩余盒数 / 3;
+
+                                    汇总表.Cells[currentRow, 1].Value = "";
+                                    汇总表.Cells[currentRow, 2].Value = "纸箱";
+                                    汇总表.Cells[currentRow, 3].Value = 包装数据.三盒装外箱;
+                                    汇总表.Cells[currentRow, 4].Value = 包装数据.三盒装尺寸;
+                                    汇总表.Cells[currentRow, 5].Value = 三盒装数量;
+                                    汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.三盒装外箱);
+                                    汇总表.Cells[currentRow, 9].Value = "3盒装标准";
+                                    汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+
+                                    var range = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                                    range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                                    range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                                    range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                                    range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+
+                                    currentRow++;
+                                    剩余盒数 %= 3;
+                                }
+
+                                // 处理二盒装
+                                if (最大支持盒数 >= 2 && !string.IsNullOrEmpty(包装数据.二盒装外箱) && 剩余盒数 >= 2)
+                                {
+                                    int 二盒装数量 = 剩余盒数 / 2;
+
+                                    汇总表.Cells[currentRow, 1].Value = "";
+                                    汇总表.Cells[currentRow, 2].Value = "纸箱";
+                                    汇总表.Cells[currentRow, 3].Value = 包装数据.二盒装外箱;
+                                    汇总表.Cells[currentRow, 4].Value = 包装数据.二盒装尺寸;
+                                    汇总表.Cells[currentRow, 5].Value = 二盒装数量;
+                                    汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.二盒装外箱);
+                                    汇总表.Cells[currentRow, 9].Value = "2盒装标准";
+                                    汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+
+                                    var range = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                                    range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                                    range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                                    range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                                    range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+
+                                    currentRow++;
+                                    剩余盒数 %= 2;
+                                }
+
+                                // 处理单盒装
+                                if (最大支持盒数 >= 1 && !string.IsNullOrEmpty(包装数据.单盒装外箱) && 剩余盒数 > 0)
+                                {
+                                    汇总表.Cells[currentRow, 1].Value = "";
+                                    汇总表.Cells[currentRow, 2].Value = "纸箱";
+                                    汇总表.Cells[currentRow, 3].Value = 包装数据.单盒装外箱;
+                                    汇总表.Cells[currentRow, 4].Value = 包装数据.单盒装尺寸;
+                                    汇总表.Cells[currentRow, 5].Value = 剩余盒数;
+                                    汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.单盒装外箱);
+                                    汇总表.Cells[currentRow, 9].Value = "1盒装标准";
+                                    汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+
+                                    var range = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                                    range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                                    range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                                    range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                                    range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+
+                                    currentRow++;
+                                }
+                            }
                         }
-
-                        int 剩余盒数 = 总盒数;  // 使用计算出的总盒数
-
-                        // 处理五盒装
-                        if (最大支持盒数 >= 5 && !string.IsNullOrEmpty(包装数据.五盒装外箱) && 剩余盒数 >= 5)
-                        {
-                            int 五盒装数量 = 剩余盒数 / 5;
-
-                            汇总表.Cells[currentRow, 1].Value = "";
-                            汇总表.Cells[currentRow, 2].Value = "纸箱";
-                            汇总表.Cells[currentRow, 3].Value = 包装数据.五盒装外箱;
-                            汇总表.Cells[currentRow, 4].Value = 包装数据.五盒装尺寸;
-                            汇总表.Cells[currentRow, 5].Value = 五盒装数量;
-                            汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.五盒装外箱);
-                            汇总表.Cells[currentRow, 9].Value = "5盒装标准";
-                            汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
-
-                            var range = 汇总表.Cells[currentRow, 1, currentRow, 9];
-                            range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
-                            range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
-                            range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
-                            range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
-
-                            currentRow++;
-                            剩余盒数 %= 5;
-                        }
-
-                        // 处理三盒装
-                        if (最大支持盒数 >= 3 && !string.IsNullOrEmpty(包装数据.三盒装外箱) && 剩余盒数 >= 3)
-                        {
-                            int 三盒装数量 = 剩余盒数 / 3;
-
-                            汇总表.Cells[currentRow, 1].Value = "";
-                            汇总表.Cells[currentRow, 2].Value = "纸箱";
-                            汇总表.Cells[currentRow, 3].Value = 包装数据.三盒装外箱;
-                            汇总表.Cells[currentRow, 4].Value = 包装数据.三盒装尺寸;
-                            汇总表.Cells[currentRow, 5].Value = 三盒装数量;
-                            汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.三盒装外箱);
-                            汇总表.Cells[currentRow, 9].Value = "3盒装标准";
-                            汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
-
-                            var range = 汇总表.Cells[currentRow, 1, currentRow, 9];
-                            range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
-                            range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
-                            range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
-                            range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
-
-                            currentRow++;
-                            剩余盒数 %= 3;
-                        }
-
-                        // 处理二盒装
-                        if (最大支持盒数 >= 2 && !string.IsNullOrEmpty(包装数据.二盒装外箱) && 剩余盒数 >= 2)
-                        {
-                            int 二盒装数量 = 剩余盒数 / 2;
-
-                            汇总表.Cells[currentRow, 1].Value = "";
-                            汇总表.Cells[currentRow, 2].Value = "纸箱";
-                            汇总表.Cells[currentRow, 3].Value = 包装数据.二盒装外箱;
-                            汇总表.Cells[currentRow, 4].Value = 包装数据.二盒装尺寸;
-                            汇总表.Cells[currentRow, 5].Value = 二盒装数量;
-                            汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.二盒装外箱);
-                            汇总表.Cells[currentRow, 9].Value = "2盒装标准";
-                            汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
-
-                            var range = 汇总表.Cells[currentRow, 1, currentRow, 9];
-                            range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
-                            range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
-                            range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
-                            range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
-
-                            currentRow++;
-                            剩余盒数 %= 2;
-                        }
-
-                        // 处理单盒装
-                        if (最大支持盒数 >= 1 && !string.IsNullOrEmpty(包装数据.单盒装外箱) && 剩余盒数 > 0)
-                        {
-                            汇总表.Cells[currentRow, 1].Value = "";
-                            汇总表.Cells[currentRow, 2].Value = "纸箱";
-                            汇总表.Cells[currentRow, 3].Value = 包装数据.单盒装外箱;
-                            汇总表.Cells[currentRow, 4].Value = 包装数据.单盒装尺寸;
-                            汇总表.Cells[currentRow, 5].Value = 剩余盒数;
-                            汇总表.Cells[currentRow, 6].Value = 获取仓位(包装数据.单盒装外箱);
-                            汇总表.Cells[currentRow, 9].Value = "1盒装标准";
-                            汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
-
-                            var range = 汇总表.Cells[currentRow, 1, currentRow, 9];
-                            range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
-                            range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
-                            range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
-                            range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
-
-                            currentRow++;
-                        }
-
                     }
                 }
 
-
                 汇总包.Save();
             }
-            
+
             uiTextBox_状态.AppendText($"包装汇总已更新到 {汇总文件路径}" + Environment.NewLine);
             uiTextBox_状态.AppendText("------------------------" + Environment.NewLine);
         }
@@ -2518,16 +5478,34 @@ namespace 包装计算
             using (ExcelPackage 汇总包 = new ExcelPackage(汇总文件信息))
             {
                 ExcelWorksheet 汇总表 = 汇总包.Workbook.Worksheets["包装材料需求流转单"];
-                int lastRow = 汇总表.Dimension?.End.Row ?? 6;
+                if (汇总表 == null)
+                {
+                    MessageBox.Show("找不到'包装材料需求源数据'工作表", "错误");
+                    return;
+                }
+
+                int lastRow = 6; // 默认值
+                if (汇总表.Dimension != null)
+                {
+                    lastRow = 汇总表.Dimension.End.Row;
+                }
                 int currentRow = lastRow + 1;
 
-                // 统计所有纸箱的数量
+                // 统计纸箱和通口箱数量
                 int 纸箱总数 = 0;
+                int 通口箱数量 = 0;
                 for (int row = 7; row <= lastRow; row++)
                 {
-                    if (汇总表.Cells[row, 2].Text == "纸箱")
+                    string 产品类型 = 汇总表.Cells[row, 2].Text;
+                    if (产品类型.Contains("通口箱"))
                     {
-                        // 获取数量列的值并累加
+                        if (int.TryParse(汇总表.Cells[row, 5].Text, out int 数量))
+                        {
+                            通口箱数量 += 数量;
+                        }
+                    }
+                    else if (产品类型.Contains("纸箱"))
+                    {
                         if (int.TryParse(汇总表.Cells[row, 5].Text, out int 数量))
                         {
                             纸箱总数 += 数量;
@@ -2535,17 +5513,45 @@ namespace 包装计算
                     }
                 }
 
+                // 输出调试信息
+                //MessageBox.Show($"找到通口箱数量: {通口箱数量}, 纸箱总数: {纸箱总数}");
+
+                // 确定说明书数量
+                int 说明书数量 = 变量.客户代码.Contains("17034") ? 通口箱数量 : 纸箱总数;
+
                 // 添加说明书信息
                 List<int> 不用下操作指引的客户 = new List<int> { 12573, 12095, 12056, 16066, 12058, 12251, 17100, 12075, 13009, 12233, 18236, 12141, 13086, 12020, 14035, 14029 };
                 if (!不用下操作指引的客户.Any(客户代码 => 变量.客户代码.Contains(客户代码.ToString())))
                 {
-                    if (变量.包装要求.Contains("中文"))
+                    bool 已添加说明书 = false;
+
+                    // 根据包装要求添加主要说明书
+                    if (变量.包装要求.Contains("水下说明书") || 变量.标签.Contains("水下"))
+                    {
+                        汇总表.Cells[currentRow, 1].Value = "";
+                        汇总表.Cells[currentRow, 2].Value = "配件说明书";
+                        汇总表.Cells[currentRow, 3].Value = "1006.010026";
+                        汇总表.Cells[currentRow, 4].Value = "UL676-UL2108-CE 水下通用说明书";
+                        汇总表.Cells[currentRow, 5].Value = 说明书数量;
+                        汇总表.Cells[currentRow, 6].Value = 获取仓位("1006.010026");
+                        汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+
+                        var dataRange = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                        dataRange.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                        dataRange.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                        dataRange.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                        dataRange.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+
+                        currentRow++;
+                        已添加说明书 = true;
+                    }
+                    else if (变量.包装要求.Contains("中文"))
                     {
                         汇总表.Cells[currentRow, 1].Value = "";
                         汇总表.Cells[currentRow, 2].Value = "配件说明书";
                         汇总表.Cells[currentRow, 3].Value = "1006.010021";
                         汇总表.Cells[currentRow, 4].Value = "中文版中性通用操作指引说明书";
-                        汇总表.Cells[currentRow, 5].Value = 纸箱总数;
+                        汇总表.Cells[currentRow, 5].Value = 说明书数量;
                         汇总表.Cells[currentRow, 6].Value = 获取仓位("1006.010021");
                         汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
 
@@ -2556,6 +5562,7 @@ namespace 包装计算
                         dataRange.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
 
                         currentRow++;
+                        已添加说明书 = true;
                     }
                     else
                     {
@@ -2563,7 +5570,7 @@ namespace 包装计算
                         汇总表.Cells[currentRow, 2].Value = "配件说明书";
                         汇总表.Cells[currentRow, 3].Value = "1006.010020";
                         汇总表.Cells[currentRow, 4].Value = "英文版中性通用操作指引说明书";
-                        汇总表.Cells[currentRow, 5].Value = 纸箱总数;
+                        汇总表.Cells[currentRow, 5].Value = 说明书数量;
                         汇总表.Cells[currentRow, 6].Value = 获取仓位("1006.010020");
                         汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
 
@@ -2574,44 +5581,49 @@ namespace 包装计算
                         dataRange.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
 
                         currentRow++;
+                        已添加说明书 = true;
                     }
 
-                    if (变量.标签.Contains("UL 676"))
+                    // 只在未添加过水下说明书时添加额外的说明书
+                    if (!已添加说明书)
                     {
-                        汇总表.Cells[currentRow, 1].Value = "";
-                        汇总表.Cells[currentRow, 2].Value = "配件说明书";
-                        汇总表.Cells[currentRow, 3].Value = "1006.010022";
-                        汇总表.Cells[currentRow, 4].Value = "英文版UL676产品系列通用";
-                        汇总表.Cells[currentRow, 5].Value = 纸箱总数;
-                        汇总表.Cells[currentRow, 6].Value = 获取仓位("1006.010022");
-                        汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+                        if (变量.标签.Contains("UL 676"))
+                        {
+                            汇总表.Cells[currentRow, 1].Value = "";
+                            汇总表.Cells[currentRow, 2].Value = "配件说明书";
+                            汇总表.Cells[currentRow, 3].Value = "1006.010022";
+                            汇总表.Cells[currentRow, 4].Value = "英文版UL676产品系列通用";
+                            汇总表.Cells[currentRow, 5].Value = 说明书数量;
+                            汇总表.Cells[currentRow, 6].Value = 获取仓位("1006.010022");
+                            汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
 
-                        var dataRange = 汇总表.Cells[currentRow, 1, currentRow, 9];
-                        dataRange.Style.Border.Top.Style = ExcelBorderStyle.Thin;
-                        dataRange.Style.Border.Left.Style = ExcelBorderStyle.Thin;
-                        dataRange.Style.Border.Right.Style = ExcelBorderStyle.Thin;
-                        dataRange.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                            var dataRange = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                            dataRange.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                            dataRange.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                            dataRange.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                            dataRange.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
 
-                        currentRow++;
-                    }
+                            currentRow++;
+                        }
 
-                    if (变量.标签.Contains("水下"))
-                    {
-                        汇总表.Cells[currentRow, 1].Value = "";
-                        汇总表.Cells[currentRow, 2].Value = "配件说明书";
-                        汇总表.Cells[currentRow, 3].Value = "1006.010023";
-                        汇总表.Cells[currentRow, 4].Value = "英文版UL2108/CE产品系列水下方案说明书通用";
-                        汇总表.Cells[currentRow, 5].Value = 纸箱总数;
-                        汇总表.Cells[currentRow, 6].Value = 获取仓位("1006.010023");
-                        汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
+                        if (变量.标签.Contains("水下"))
+                        {
+                            汇总表.Cells[currentRow, 1].Value = "";
+                            汇总表.Cells[currentRow, 2].Value = "配件说明书";
+                            汇总表.Cells[currentRow, 3].Value = "1006.010026";
+                            汇总表.Cells[currentRow, 4].Value = "UL676-UL2108-CE 水下通用说明书";
+                            汇总表.Cells[currentRow, 5].Value = 说明书数量;
+                            汇总表.Cells[currentRow, 6].Value = 获取仓位("1006.010023");
+                            汇总表.Cells[currentRow, 11].Value = Path.GetFileName(当前处理文件名);
 
-                        var dataRange = 汇总表.Cells[currentRow, 1, currentRow, 9];
-                        dataRange.Style.Border.Top.Style = ExcelBorderStyle.Thin;
-                        dataRange.Style.Border.Left.Style = ExcelBorderStyle.Thin;
-                        dataRange.Style.Border.Right.Style = ExcelBorderStyle.Thin;
-                        dataRange.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+                            var dataRange = 汇总表.Cells[currentRow, 1, currentRow, 9];
+                            dataRange.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+                            dataRange.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+                            dataRange.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+                            dataRange.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
 
-                        currentRow++;
+                            currentRow++;
+                        }
                     }
                 }
 
@@ -2679,9 +5691,5 @@ namespace 包装计算
 
             return "#N/A";
         }
-
-
-
-        
     }
 }

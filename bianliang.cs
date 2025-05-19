@@ -27,7 +27,7 @@ namespace 包装计算
         public Dictionary<string, List<string>> 附件表数据 = new Dictionary<string, List<string>>();
 
         // 在变量类中更新订单出线字典的定义
-        public Dictionary<string, List<(string 型号, HashSet<string> 出线方式, string F列内容, double 销售数量)>> 订单出线字典;
+        public Dictionary<string, List<(string 型号, HashSet<string> 出线方式, string F列内容, double 销售数量, string 客户型号)>> 订单出线字典;
 
         public List<double> 测试 = new List<double>();
 
@@ -139,6 +139,7 @@ public class 匹配信息
     public string 订单编号 { get; set; }
     public string 产品型号 { get; set; }
     public HashSet<string> 出线方式 { get; set; }
+    public string 客户型号 { get; set; } // 新增客户型号属性
 
     public double 销售数量 { get; set; }
     public double 线材长度 { get; set; } // 新增的属性
@@ -161,7 +162,7 @@ public class 匹配信息
         return null;
     }
 
-    public 匹配信息(string 订单编号, string 产品型号, HashSet<string> 出线方式, double 销售数量, string 工作表名称, double 工作表总米数, double 线材长度)
+    public 匹配信息(string 订单编号, string 产品型号, HashSet<string> 出线方式, double 销售数量, string 工作表名称, double 工作表总米数, double 线材长度, string 客户型号 = "")
     {
         this.订单编号 = 订单编号;
         this.产品型号 = 产品型号;
@@ -170,6 +171,7 @@ public class 匹配信息
         this.工作表名称 = 工作表名称;
         this.工作表总米数 = 工作表总米数;
         this.线材长度 = 线材长度;
+        this.客户型号 = 客户型号;
     }
 
     // 新增方法：添加A列序号映射
@@ -200,6 +202,7 @@ public class 匹配信息
                $"产品型号：{产品型号}\n" +
                $"出线方式：{出线方式字符串}\n" +
                $"销售数量：{销售数量:F3}\n" +
+               (string.IsNullOrEmpty(客户型号) ? "" : $"客户型号：{客户型号}\n") +
                $"匹配工作表：{工作表名称}\n" +
                $"工作表总米数：{工作表总米数:F3}\n" +
                $"A列序号映射：{序号映射字符串}";
